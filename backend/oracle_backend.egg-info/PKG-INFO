@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: oracle-backend
+Version: 0.1.0
+Summary: FastAPI backend for the ORACLE crypto AI analyst dashboard.
+Requires-Python: >=3.11
+Requires-Dist: alembic>=1.13.2
+Requires-Dist: ccxt>=4.3.0
+Requires-Dist: fastapi>=0.111.0
+Requires-Dist: numpy>=1.26.4
+Requires-Dist: openai>=1.35.0
+Requires-Dist: pandas>=2.2.2
+Requires-Dist: psycopg[binary]>=3.2.1
+Requires-Dist: pydantic>=2.8.2
+Requires-Dist: pydantic-settings>=2.3.4
+Requires-Dist: sqlalchemy>=2.0.31
+Requires-Dist: uvicorn[standard]>=0.30.1

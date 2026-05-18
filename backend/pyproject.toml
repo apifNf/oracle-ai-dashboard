@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oracle-backend"
+version = "0.1.0"
+description = "FastAPI backend for the ORACLE crypto AI analyst dashboard."
+requires-python = ">=3.11"
+
+dependencies = [
+    "alembic>=1.13.2",
+    "ccxt>=4.3.0",
+    "fastapi>=0.111.0",
+    "numpy>=1.26.4",
+    "openai>=1.35.0",
+    "pandas>=2.2.2",
+    "psycopg[binary]>=3.2.1",
+    "pydantic>=2.8.2",
+    "pydantic-settings>=2.3.4",
+    "sqlalchemy>=2.0.31",
+    "uvicorn[standard]>=0.30.1"
+]
+
+[tool.setuptools]
+packages = ["app"]
