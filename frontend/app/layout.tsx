@@ -27,7 +27,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               {/* AREA BRANDING A-TECH LABS */}
               <footer className="w-full mt-auto pt-6 pb-3 flex justify-end items-center pr-5">
                 <p className="text-xs font-medium text-zinc-600 tracking-wide">
-                  Designed by <span className="text-slate-600 dark:text-zinc-400 font-bold hover:!text-emerald-500 dark:hover:!text-emerald-400 transition-colors cursor-pointer">A-Tech Labs</span>
+                  © 2026 ORACLE. All Rights Reserved. | Created by <span className="text-slate-600 dark:text-zinc-400 font-bold hover:!text-emerald-500 dark:hover:!text-emerald-400 transition-colors cursor-pointer">A-Tech Labs</span>
                 </p>
               </footer>
 
