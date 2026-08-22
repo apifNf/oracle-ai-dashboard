@@ -33,7 +33,6 @@ export default function DashboardPage() {
         return res.json();
       })
       .then((json) => {
-        // Logika penghitungan sinyal yang akurat dan dinamis
         let signalsCount = 0;
         if (Array.isArray(json)) {
           signalsCount = json.length;
@@ -96,15 +95,17 @@ export default function DashboardPage() {
   // JSX
   return (
     <div className="space-y-6">
+      {/* HEADER SECTION */}
       <div>
-        <p className="text-sm uppercase tracking-[0.24em] text-accent text-zinc-400">
+        <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400 transition-colors duration-500">
           Dashboard
         </p>
-        <h1 className="mt-2 text-3xl font-semibold">
+        <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-zinc-50 transition-colors duration-500">
           Market command center
         </h1>
       </div>
 
+      {/* METRICS SECTION */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           icon={BarChart3}
@@ -112,21 +113,18 @@ export default function DashboardPage() {
           value={data.market_regime}
           detail="Live backend signal"
         />
-
         <MetricCard
           icon={Activity}
           label="Active Signals"
           value={String(data.active_signals)}
           detail="Fetched from API"
         />
-
         <MetricCard
           icon={Brain}
           label="AI Notes"
           value="Online"
           detail={data.ai_notes}
         />
-
         <MetricCard
           icon={NotebookPen}
           label="Journal"
@@ -135,36 +133,32 @@ export default function DashboardPage() {
         />
       </div>
 
-      <section className="rounded-lg border border-zinc-800 bg-[#09090b] p-6 space-y-4">
-        <h2 className="text-lg font-medium">ORACLE AI Analyst</h2>
+      {/* AI ANALYST SECTION */}
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] p-6 space-y-4 shadow-sm dark:shadow-none transition-colors duration-500">
+        <h2 className="text-lg font-medium text-slate-900 dark:text-zinc-50 transition-colors duration-500">
+          ORACLE AI Analyst
+        </h2>
 
+        {/* Textarea dengan Full Tailwind (Meninggalkan Inline CSS) */}
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.currentTarget.value)}
           placeholder="Ask ORACLE about BTC, market sentiment, signals..."
           rows={4}
-          style={{
-            width: "100%",
-            backgroundColor: "#09090b",
-            color: "#ffffff",
-            border: "1px solid #27272a", // zinc-800
-            borderRadius: "12px",
-            padding: "16px",
-            fontSize: "14px",
-            outline: "none",
-          }}
+          className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900 outline-none transition-all duration-300 placeholder:text-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-800 dark:bg-[#09090b] dark:text-white dark:placeholder:text-zinc-500 dark:focus:border-emerald-500 dark:focus:ring-emerald-500"
         />
 
         <button
           onClick={askAI}
           disabled={loading}
-          className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 hover:bg-zinc-800 transition-colors disabled:opacity-50"
+          className="rounded-lg border border-slate-200 bg-slate-100 px-4 py-2 font-medium text-slate-800 transition-colors duration-300 hover:bg-slate-200 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           {loading ? "Analyzing..." : "Ask ORACLE"}
         </button>
 
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4 min-h-[140px]">
-          <p className="text-sm whitespace-pre-wrap leading-relaxed text-zinc-300">
+        {/* Area Jawaban AI */}
+        <div className="min-h-[140px] rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/50 transition-colors duration-500">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-zinc-300 transition-colors duration-500">
             {reply || "ORACLE response will appear here."}
           </p>
         </div>

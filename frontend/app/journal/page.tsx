@@ -34,31 +34,59 @@ export default function JournalPage() {
 
   return (
     <div className="space-y-6 relative">
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">Journal</p>
-          <h1 className="mt-2 text-3xl font-semibold flex items-center gap-3">
+          <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400 transition-colors">Journal</p>
+          <h1 className="mt-2 text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50 transition-colors">
             <NotebookPen className="w-8 h-8 text-emerald-500" /> Trading Journal
           </h1>
         </div>
-        <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-500 transition-colors">
+        <button 
+          onClick={() => setIsModalOpen(true)} 
+          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-500 transition-colors shadow-sm"
+        >
           <Plus className="w-4 h-4" /> New Entry
         </button>
       </div>
 
-      <div className="border border-zinc-800 bg-[#09090b] rounded-xl overflow-hidden mt-6">
+      {/* TABLE SECTION */}
+      <div className="border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl overflow-hidden mt-6 shadow-sm dark:shadow-none transition-colors duration-500">
         <table className="w-full text-left text-sm">
-          <thead className="bg-zinc-900 border-b border-zinc-800 text-zinc-400">
-            <tr><th className="p-4 font-medium">Date</th><th className="p-4 font-medium">Asset Pair</th><th className="p-4 font-medium">Position</th><th className="p-4 font-medium">PnL Result</th><th className="p-4 font-medium">Notes</th></tr>
+          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 dark:bg-zinc-900/50 dark:border-zinc-800 dark:text-zinc-400 transition-colors">
+            <tr>
+              <th className="p-4 font-medium">Date</th>
+              <th className="p-4 font-medium">Asset Pair</th>
+              <th className="p-4 font-medium">Position</th>
+              <th className="p-4 font-medium">PnL Result</th>
+              <th className="p-4 font-medium">Notes</th>
+            </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800/50">
+          <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/50 transition-colors">
             {trades.map((trade) => (
-              <tr key={trade.id} className="hover:bg-zinc-900/30">
-                <td className="p-4 text-zinc-400">{trade.date}</td>
-                <td className="p-4 font-bold">{trade.pair}</td>
-                <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${trade.type === "LONG" ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"}`}>{trade.type}</span></td>
-                <td className="p-4"><div className={`flex items-center gap-1 font-mono font-medium ${trade.pnl.startsWith("+") ? "text-emerald-500" : "text-red-500"}`}>{trade.pnl.startsWith("+") ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />} {trade.pnl}</div></td>
-                <td className="p-4 text-zinc-400 max-w-xs truncate">{trade.notes}</td>
+              <tr key={trade.id} className="hover:bg-slate-50 dark:hover:bg-zinc-900/30 transition-colors">
+                <td className="p-4 text-slate-500 dark:text-zinc-400">{trade.date}</td>
+                <td className="p-4 font-bold text-slate-900 dark:text-white">{trade.pair}</td>
+                <td className="p-4">
+                  <span className={`px-2 py-1 rounded text-xs font-bold transition-colors ${
+                    trade.type === "LONG" 
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500" 
+                      : "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-500"
+                  }`}>
+                    {trade.type}
+                  </span>
+                </td>
+                <td className="p-4">
+                  <div className={`flex items-center gap-1 font-mono font-medium transition-colors ${
+                    trade.pnl.startsWith("+") 
+                      ? "text-emerald-600 dark:text-emerald-500" 
+                      : "text-red-600 dark:text-red-500"
+                  }`}>
+                    {trade.pnl.startsWith("+") ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />} 
+                    {trade.pnl}
+                  </div>
+                </td>
+                <td className="p-4 text-slate-500 dark:text-zinc-400 max-w-xs truncate">{trade.notes}</td>
               </tr>
             ))}
           </tbody>
@@ -67,20 +95,67 @@ export default function JournalPage() {
 
       {/* POPUP MODAL UNTUK NEW ENTRY */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-[#09090b] border border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden">
-            <div className="flex justify-between items-center p-4 border-b border-zinc-800">
-              <h2 className="text-lg font-semibold">Log New Trade</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
+        <div className="fixed inset-0 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-colors">
+          <div className="bg-white border-slate-200 dark:bg-[#09090b] dark:border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden shadow-xl dark:shadow-none transition-colors duration-300">
+            
+            <div className="flex justify-between items-center p-4 border-b border-slate-200 dark:border-zinc-800 transition-colors">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Log New Trade</h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
             </div>
+
             <form onSubmit={handleAddTrade} className="p-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><label className="text-xs text-zinc-400">Asset Pair</label><input required value={newPair} onChange={(e) => setNewPair(e.target.value)} placeholder="e.g., BTC/USDT" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-sm" /></div>
-                <div className="space-y-2"><label className="text-xs text-zinc-400">Position</label><select value={newType} onChange={(e) => setNewType(e.target.value)} className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-sm outline-none"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">Asset Pair</label>
+                  <input 
+                    required 
+                    value={newPair} 
+                    onChange={(e) => setNewPair(e.target.value)} 
+                    placeholder="e.g., BTC/USDT" 
+                    className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors" 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">Position</label>
+                  <select 
+                    value={newType} 
+                    onChange={(e) => setNewType(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                  >
+                    <option value="LONG">LONG</option>
+                    <option value="SHORT">SHORT</option>
+                  </select>
+                </div>
               </div>
-              <div className="space-y-2"><label className="text-xs text-zinc-400">PnL % (use + or -)</label><input required value={newPnl} onChange={(e) => setNewPnl(e.target.value)} placeholder="e.g., +5.5% or -2.1%" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-sm font-mono" /></div>
-              <div className="space-y-2"><label className="text-xs text-zinc-400">Trade Notes & Lessons</label><textarea required value={newNotes} onChange={(e) => setNewNotes(e.target.value)} rows={3} placeholder="Why did you take this trade?" className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-sm" /></div>
-              <button type="submit" className="w-full bg-emerald-600 text-white font-medium rounded-lg p-2.5 mt-2 hover:bg-emerald-500 transition-colors">Save Trade to Journal</button>
+              
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">PnL % (use + or -)</label>
+                <input 
+                  required 
+                  value={newPnl} 
+                  onChange={(e) => setNewPnl(e.target.value)} 
+                  placeholder="e.g., +5.5% or -2.1%" 
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-2.5 text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors" 
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">Trade Notes & Lessons</label>
+                <textarea 
+                  required 
+                  value={newNotes} 
+                  onChange={(e) => setNewNotes(e.target.value)} 
+                  rows={3} 
+                  placeholder="Why did you take this trade?" 
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors" 
+                />
+              </div>
+              
+              <button type="submit" className="w-full bg-emerald-600 text-white font-medium rounded-lg p-2.5 mt-2 hover:bg-emerald-500 transition-colors shadow-sm">
+                Save Trade to Journal
+              </button>
             </form>
           </div>
         </div>

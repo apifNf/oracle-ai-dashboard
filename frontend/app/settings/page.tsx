@@ -37,27 +37,28 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 max-w-4xl relative">
+      {/* HEADER */}
       <div>
-        <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">Settings</p>
-        <h1 className="mt-2 text-3xl font-semibold">Workspace Configuration</h1>
+        <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400 transition-colors">Settings</p>
+        <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-zinc-50 transition-colors">Workspace Configuration</h1>
       </div>
 
       <div className="grid gap-6 mt-8">
-        {/* Exchange Configuration */}
-        <section className="p-6 border border-zinc-800 bg-[#09090b] rounded-xl space-y-5">
-          <div className="flex items-center gap-3 border-b border-zinc-800/50 pb-4">
+        
+        {/* EXCHANGE CONFIGURATION */}
+        <section className="p-6 border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl space-y-5 shadow-sm dark:shadow-none transition-colors duration-500">
+          <div className="flex items-center gap-3 border-b border-slate-200 dark:border-zinc-800/50 pb-4 transition-colors">
             <Wallet className="w-5 h-5 text-emerald-500" />
-            <h2 className="text-lg font-medium">Exchange Connectivity</h2>
+            <h2 className="text-lg font-medium text-slate-900 dark:text-zinc-100 transition-colors">Exchange Connectivity</h2>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm text-zinc-400">Primary Exchange</label>
-              {/* Menyambungkan pilihan dropdown ke state */}
+              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">Primary Exchange</label>
               <select 
                 value={exchange}
                 onChange={(e) => setExchange(e.target.value)}
-                className="w-full p-3 bg-zinc-900 border border-zinc-800 rounded-lg text-sm outline-none focus:border-zinc-600"
+                className="w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
               >
                 <option value="okx">OKX</option>
                 <option value="mexc">MEXC</option>
@@ -67,11 +68,11 @@ export default function SettingsPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-zinc-400">Trading Environment</label>
+              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">Trading Environment</label>
               <select 
                 value={environment}
                 onChange={(e) => setEnvironment(e.target.value)}
-                className="w-full p-3 bg-zinc-900 border border-zinc-800 rounded-lg text-sm outline-none focus:border-zinc-600"
+                className="w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
               >
                 <option value="spot">Spot Market</option>
                 <option value="futures">Perpetual Futures</option>
@@ -80,54 +81,58 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        {/* API Management */}
-        <section className="p-6 border border-zinc-800 bg-[#09090b] rounded-xl space-y-5">
-          <div className="flex items-center gap-3 border-b border-zinc-800/50 pb-4">
+        {/* API MANAGEMENT */}
+        <section className="p-6 border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl space-y-5 shadow-sm dark:shadow-none transition-colors duration-500">
+          <div className="flex items-center gap-3 border-b border-slate-200 dark:border-zinc-800/50 pb-4 transition-colors">
             <Key className="w-5 h-5 text-emerald-500" />
-            <h2 className="text-lg font-medium">API Keys & Security</h2>
+            <h2 className="text-lg font-medium text-slate-900 dark:text-zinc-100 transition-colors">API Keys & Security</h2>
           </div>
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm text-zinc-400">ORACLE AI Engine (OpenAI Key)</label>
+              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">ORACLE AI Engine (OpenAI Key)</label>
               <input 
                 type="password" 
                 value={openAiKey}
                 onChange={(e) => setOpenAiKey(e.target.value)}
                 placeholder="sk-..." 
-                className="w-full p-3 bg-zinc-900 border border-zinc-800 rounded-lg text-sm outline-none focus:border-zinc-600 font-mono" 
+                className="w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono transition-all" 
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-zinc-400">Exchange API Key (Optional for Read-Only)</label>
+              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">Exchange API Key (Optional for Read-Only)</label>
               <input 
                 type="password" 
                 value={exchangeKey}
                 onChange={(e) => setExchangeKey(e.target.value)}
                 placeholder="Enter API Key" 
-                className="w-full p-3 bg-zinc-900 border border-zinc-800 rounded-lg text-sm outline-none focus:border-zinc-600 font-mono" 
+                className="w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono transition-all" 
               />
             </div>
           </div>
-          <div className="flex items-start gap-3 p-4 bg-zinc-900/50 rounded-lg border border-zinc-800">
-            <Shield className="w-5 h-5 text-zinc-400 flex-shrink-0" />
-            <p className="text-xs text-zinc-400 leading-relaxed">
+          
+          {/* Security Banner */}
+          <div className="flex items-start gap-3 p-4 bg-slate-50 border border-slate-200 dark:bg-zinc-900/50 dark:border-zinc-800 rounded-lg transition-colors">
+            <Shield className="w-5 h-5 text-slate-500 dark:text-zinc-400 flex-shrink-0 transition-colors" />
+            <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed transition-colors">
               API Keys are securely saved in your browser's local storage. They are never sent to external databases.
             </p>
           </div>
         </section>
 
+        {/* SAVE BUTTON */}
         <div className="flex justify-end pt-4">
           <button 
             onClick={handleSave}
-            className={`flex items-center gap-2 px-6 py-2.5 font-semibold rounded-lg transition-colors ${
+            className={`flex items-center gap-2 px-6 py-2.5 font-semibold rounded-lg transition-all duration-300 shadow-sm dark:shadow-none ${
               isSaved 
                 ? "bg-emerald-600 text-white" 
-                : "bg-zinc-100 text-black hover:bg-white"
+                : "bg-slate-900 text-white hover:bg-slate-800 dark:bg-zinc-100 dark:text-black dark:hover:bg-white"
             }`}
           >
             {isSaved ? <><Check className="w-4 h-4" /> Configuration Saved!</> : <><Save className="w-4 h-4" /> Save Configuration</>}
           </button>
         </div>
+        
       </div>
     </div>
   );
