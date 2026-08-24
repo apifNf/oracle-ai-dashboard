@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, Gauge, MessageSquareText, NotebookPen, Settings } from "lucide-react";
+import { Bot, Gauge, MessageSquareText, NotebookPen, Settings, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: Gauge },
   { href: "/scanner", label: "Scanner", icon: Bot },
   { href: "/ai-chat", label: "AI Chat", icon: MessageSquareText },
+  { href: "/market-intelligence", label: "Market Intelligence", icon: Globe },
   { href: "/journal", label: "Journal", icon: NotebookPen },
   { href: "/settings", label: "Settings", icon: Settings }
 ];
