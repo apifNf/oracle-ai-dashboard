@@ -68,9 +68,9 @@ docker compose --env-file .env up --build
 
 Services:
 
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000
-- Backend health: http://localhost:8000/api/v1/health
+- Frontend: http://oracleaicrypto.com
+- Backend: http://oracleaicrypto.com
+- Backend health: [http://render/health](https://oracle-ai-dashboard.onrender.com)
 
 ## Notes
 
