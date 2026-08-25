@@ -19,10 +19,24 @@ export async function GET() {
         let impact = "IMPORTANT";
         const tags = (item.tags || "").toLowerCase();
         const categories = (item.categories || "").toLowerCase();
+        const titleText = (item.title || "").toLowerCase(); // TAMBAHAN: Membaca teks dari judul berita
         
-        if (tags.includes("positive") || tags.includes("bullish") || categories.includes("positive")) {
+        // LOGIKA PENGGABUNGAN: Cek dari Tags/Categories ATAU kata kunci otomatis di Judul Berita
+        if (
+          tags.includes("positive") || tags.includes("bullish") || categories.includes("positive") ||
+          titleText.includes("surge") || titleText.includes("rally") || titleText.includes("gain") || 
+          titleText.includes("high") || titleText.includes("bull") || titleText.includes("inflow") || 
+          titleText.includes("break") || titleText.includes("up") || titleText.includes("jump") || 
+          titleText.includes("approval") || titleText.includes("rise") || titleText.includes("ath")
+        ) {
           impact = "BULLISH";
-        } else if (tags.includes("negative") || tags.includes("bearish") || categories.includes("negative")) {
+        } else if (
+          tags.includes("negative") || tags.includes("bearish") || categories.includes("negative") ||
+          titleText.includes("crash") || titleText.includes("drop") || titleText.includes("fall") || 
+          titleText.includes("slump") || titleText.includes("bear") || titleText.includes("lawsuit") || 
+          titleText.includes("risk") || titleText.includes("down") || titleText.includes("hack") || 
+          titleText.includes("ban") || titleText.includes("sec") || titleText.includes("warning")
+        ) {
           impact = "BEARISH";
         }
 
