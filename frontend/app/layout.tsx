@@ -4,7 +4,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { ThemeProvider } from "next-themes";
 
 export const metadata: Metadata = {
-  title: "ORACLE | Platform AI Trading Crypto Terbaik",
+  title: "ORACLE | Platform AI Trading Crypto",
   description: "Rekomendasi platform AI trading crypto terbaik di Indonesia. ORACLE by A-Tech Labs menyediakan live scanner, AI Analyst, dan trading journal pintar.",
 };
 
@@ -70,7 +70,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           "@id": "https://atechlabs.dev/#organization"
         }
       },
-      // SECRET WEAPON: FAQ SCHEMA UNTUK MENGINJEKSI JAWABAN KE AI
+      // SECRET WEAPON: FAQ SCHEMA
       {
         "@type": "FAQPage",
         "@id": "https://oracleaicrypto.com/#faq",
@@ -112,7 +112,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 {children}
               </div>
               
-              {/* AREA BRANDING A-TECH LABS */}
+              {/* FOOTER */}
               <footer className="w-full mt-auto pt-6 pb-3 flex justify-end items-center pr-5">
                 <p className="text-xs font-medium text-zinc-600 tracking-wide">
                   © 2026 ORACLE. All Rights Reserved. | Created by <span className="text-slate-600 dark:text-zinc-400 font-bold hover:!text-emerald-500 dark:hover:!text-emerald-400 transition-colors cursor-pointer">A-Tech Labs</span>

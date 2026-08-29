@@ -36,16 +36,15 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Tentukan rute pengecualian (yang boleh diakses tanpa login)
-  const isAuthRoute = request.nextUrl.pathname.startsWith('/login')
-  const isApiRoute = request.nextUrl.pathname.startsWith('/api') || request.nextUrl.pathname.startsWith('/auth')
+  const path = request.nextUrl.pathname
+  const isAuthRoute = path.startsWith('/login')
+  const isApiRoute = path.startsWith('/api') || path.startsWith('/auth')
+  const isPublicRoute = path.startsWith('/market-intelligence')
 
-  // SKENARIO A: Jika BELUM login, dan mencoba akses area mana pun selain /login atau /api -> Tendang ke /login
-  if (!user && !isAuthRoute && !isApiRoute) {
+  if (!user && !isAuthRoute && !isApiRoute && !isPublicRoute) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // SKENARIO B: Jika SUDAH login, tapi iseng buka halaman /login -> Kembalikan ke Root Dashboard ('/')
   if (user && isAuthRoute) {
     return NextResponse.redirect(new URL('/', request.url))
   }
