@@ -1,5 +1,6 @@
 import base64
 import os
+import re
 import requests
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
@@ -23,14 +24,6 @@ class MessageCreate(BaseModel):
 class ChatRequest(BaseModel):
     prompt: str
 
-# D Daftar koin yang dikenali sistem untuk deteksi otomatis dari prompt pengguna
-SUPPORTED_COINS = [
-    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", 
-    "DOT", "SHIB", "LTC", "BCH", "NEAR", "SUI", "RENDER", "PEPE", 
-    "MATIC", "UNI", "ICP", "ZEC", "KAS", "TAO", "FTM", "ARB", "OP", "IMX", "STX", "INJ", "ATOM"
-]
-
-# 1. MAIN CHAT ENDPOINT (Dynamic Asset & Indicator Extractor)
 @router.post("/")
 @router.post("")
 async def standard_chat(request: ChatRequest):
@@ -38,20 +31,16 @@ async def standard_chat(request: ChatRequest):
     if not api_key:
         return {"status": "error", "reply": "Kunci API OpenAI tidak ditemukan di backend."}
 
-    # Deteksi otomatis koin apa saja yang disebut oleh user di dalam prompt
     prompt_upper = request.prompt.upper()
-    detected_coins = []
-    for coin in SUPPORTED_COINS:
-        if coin in prompt_upper or coin.lower() in request.prompt.lower():
-            detected_coins.append(coin)
+    potential_coins = re.findall(r'\b[A-Z0-9]{2,8}\b', prompt_upper)
+    
+    ignore_words = {"TOLONG", "BANTU", "ANALISA", "DI", "TF", "BAGAIMANA", "APAKAH", "SAYA", "HARUS", "MEMBELI", "ATAU", "LEBIH", "BAIK", "UNTUK", "SAAT", "INI", "LONG", "SHORT", "USDT"}
+    detected_coins = [coin for coin in potential_coins if coin not in ignore_words]
+    detected_coins = list(set(detected_coins))[:3]
 
-    # Fallback jika tidak ada koin spesifik yang terdeteksi
     if not detected_coins:
         detected_coins = ["BTC", "ETH"]
-    else:
-        detected_coins = list(set(detected_coins))[:3] # Batasi maksimal 3 koin agar respons tetap cepat
 
-    # Tarik data teknikal real-time menggunakan IndicatorEngine (Binance) untuk koin yang diminta
     engine = IndicatorEngine()
     market_contexts = []
     
@@ -90,15 +79,12 @@ async def standard_chat(request: ChatRequest):
         )
         
         ai_reply = response.choices[0].message.content
-        
-        # Tambahkan label informasi transparan di awal balasan agar UI frontend menampilkan koin apa yang sedang dibaca
         formatted_reply = f"🟢 **LIVE MARKET DATA INJECTED: {injected_label}**\n\n{ai_reply}"
 
         return {"status": "success", "reply": formatted_reply}
     except Exception as e:
         return {"status": "error", "reply": f"Neural Net Error: {str(e)}"}
 
-# 2. MEMORY ENDPOINT
 @router.post("/memory")
 def save_chat_memory(data: MessageCreate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == data.user_id).first()
@@ -124,7 +110,6 @@ def save_chat_memory(data: MessageCreate, db: Session = Depends(get_db)):
     
     return {"status": "success", "conversation_id": conv_id, "message": "Memory saved"}
 
-# 3. VISION ENDPOINT
 @router.post("/vision")
 async def analyze_image(file: UploadFile = File(...), prompt: str = Form(default="")):
     try:
@@ -137,7 +122,7 @@ async def analyze_image(file: UploadFile = File(...), prompt: str = Form(default
         if not api_key:
             return {
                 "status": "error",
-                "reply": "**[ORACLE VISION ERROR]** OPENAI_API_KEY belum terdeteksi. Pastikan variabel OPENAI_API_KEY sudah terdaftar di backend/.env"
+                "reply": "**[ORACLE VISION ERROR]** OPENAI_API_KEY belum terdeteksi."
             }
 
         client = OpenAI(api_key=api_key)
@@ -162,7 +147,6 @@ async def analyze_image(file: UploadFile = File(...), prompt: str = Form(default
                         "🎯 **Trader Take (Long/Short):**\n"
                         "[Actionable institutional execution strategy].\n\n"
                         "CRITICAL INSTRUCTION: You MUST write the ENTIRE explanation, context, and strategy in the EXACT SAME LANGUAGE as the user's prompt. "
-                        "If the user asks in Indonesian, ALL descriptions MUST be in professional Indonesian language. Do not mix languages."
                     )
                 },
                 {
