@@ -1,7 +1,7 @@
 import base64
 import os
 import requests
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from openai import OpenAI
@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.models.chat import Conversation, Message
 from app.models.user import User
 from app.core.config import settings
+from app.indicators.engine import IndicatorEngine
 
 router = APIRouter()
 
@@ -22,7 +23,14 @@ class MessageCreate(BaseModel):
 class ChatRequest(BaseModel):
     prompt: str
 
-# 1. MAIN CHAT ENDPOINT
+# D Daftar koin yang dikenali sistem untuk deteksi otomatis dari prompt pengguna
+SUPPORTED_COINS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK", 
+    "DOT", "SHIB", "LTC", "BCH", "NEAR", "SUI", "RENDER", "PEPE", 
+    "MATIC", "UNI", "ICP", "ZEC", "KAS", "TAO", "FTM", "ARB", "OP", "IMX", "STX", "INJ", "ATOM"
+]
+
+# 1. MAIN CHAT ENDPOINT (Dynamic Asset & Indicator Extractor)
 @router.post("/")
 @router.post("")
 async def standard_chat(request: ChatRequest):
@@ -30,22 +38,35 @@ async def standard_chat(request: ChatRequest):
     if not api_key:
         return {"status": "error", "reply": "Kunci API OpenAI tidak ditemukan di backend."}
 
-    market_context = ""
-    try:
-        symbols = '["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"]'
-        url = f"https://api.binance.com/api/v3/ticker/24hr?symbols={symbols}"
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            context_lines = []
-            for item in data:
-                sym = item['symbol'].replace('USDT', '')
-                price = float(item['lastPrice'])
-                change = float(item['priceChangePercent'])
-                context_lines.append(f"{sym}: ${price} ({change}%)")
-            market_context = "Data Pasar Real-Time saat ini: " + ", ".join(context_lines) + ". "
-    except Exception as e:
-        market_context = "Gunakan pengetahuan teknikal dasar Anda. "
+    # Deteksi otomatis koin apa saja yang disebut oleh user di dalam prompt
+    prompt_upper = request.prompt.upper()
+    detected_coins = []
+    for coin in SUPPORTED_COINS:
+        if coin in prompt_upper or coin.lower() in request.prompt.lower():
+            detected_coins.append(coin)
+
+    # Fallback jika tidak ada koin spesifik yang terdeteksi
+    if not detected_coins:
+        detected_coins = ["BTC", "ETH"]
+    else:
+        detected_coins = list(set(detected_coins))[:3] # Batasi maksimal 3 koin agar respons tetap cepat
+
+    # Tarik data teknikal real-time menggunakan IndicatorEngine (Binance) untuk koin yang diminta
+    engine = IndicatorEngine()
+    market_contexts = []
+    
+    for coin in detected_coins:
+        pair = f"{coin}/USDT"
+        analysis = engine.analyze(pair)
+        if analysis:
+            market_contexts.append(
+                f"Asset: {coin}/USDT | Price: ${analysis['price']} | RSI(14): {analysis['rsi']} | EMA20: {analysis['ema20']} | EMA50: {analysis['ema50']} | Trend: {analysis['trend']}"
+            )
+        else:
+            market_contexts.append(f"Asset: {coin}/USDT | Data sedang disinkronkan.")
+
+    market_context_str = " | ".join(market_contexts)
+    injected_label = ", ".join(detected_coins)
 
     client = OpenAI(api_key=api_key)
     
@@ -56,16 +77,24 @@ async def standard_chat(request: ChatRequest):
                 {
                     "role": "system", 
                     "content": (
-                        "You are ORACLE, an elite institutional crypto trading analyst. "
-                        f"{market_context}"
-                        "Jawab dengan gaya bahasa profesional, analitis, tajam, dan layaknya eksekutif Wall Street."
+                        "You are ORACLE, an elite institutional crypto trading analyst and quantitative portfolio manager. "
+                        f"Live Market Data Injected for [{injected_label}]: {market_context_str}. "
+                        "Gunakan data teknikal real-time di atas untuk menjawab pertanyaan pengguna secara akurat, tajam, dan mendalam. "
+                        "CRITICAL INSTRUCTION: You MUST reply in the EXACT SAME LANGUAGE as the user's prompt. "
+                        "Jawab dengan gaya bahasa profesional, analitis, dan layaknya eksekutif Wall Street."
                     )
                 },
                 {"role": "user", "content": request.prompt}
             ],
-            max_tokens=800
+            max_tokens=900
         )
-        return {"status": "success", "reply": response.choices[0].message.content}
+        
+        ai_reply = response.choices[0].message.content
+        
+        # Tambahkan label informasi transparan di awal balasan agar UI frontend menampilkan koin apa yang sedang dibaca
+        formatted_reply = f"🟢 **LIVE MARKET DATA INJECTED: {injected_label}**\n\n{ai_reply}"
+
+        return {"status": "success", "reply": formatted_reply}
     except Exception as e:
         return {"status": "error", "reply": f"Neural Net Error: {str(e)}"}
 
@@ -97,7 +126,7 @@ def save_chat_memory(data: MessageCreate, db: Session = Depends(get_db)):
 
 # 3. VISION ENDPOINT
 @router.post("/vision")
-async def analyze_image(file: UploadFile = File(...)):
+async def analyze_image(file: UploadFile = File(...), prompt: str = Form(default="")):
     try:
         image_data = await file.read()
         base64_image = base64.b64encode(image_data).decode("utf-8")
@@ -112,6 +141,7 @@ async def analyze_image(file: UploadFile = File(...)):
             }
 
         client = OpenAI(api_key=api_key)
+        user_text = prompt.strip() if prompt.strip() else "Analyze this market chart and provide precise technical breakdown."
 
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -121,16 +151,18 @@ async def analyze_image(file: UploadFile = File(...)):
                     "content": (
                         "You are ORACLE, an elite institutional crypto trading analyst and quantitative architect. "
                         "Examine the attached trading chart image meticulously. "
-                        "Read the exact asset symbol (e.g., ETH/USDT, BTC/USDT, SOL/USDT) directly from the visual text on the chart header. Do not hallucinate or reuse previous symbols. "
-                        "Provide your response formatted strictly with these headers:\n\n"
+                        "Read the exact asset symbol directly from the visual text on the chart header. "
+                        "Provide your response formatted strictly with these sections:\n\n"
                         "**[ORACLE VISION ANALYSIS]**\n\n"
                         "Berdasarkan pemindaian visual pada chart **[Detected Symbol]/USDT**:\n"
                         "🟢 **Market Bias:** [Bullish/Bearish/Neutral] (Confidence: [XX]%)\n"
                         "📊 **Technical Snapshot:**\n"
-                        "- **RSI (14):** [Extracted value & momentum context]\n"
-                        "- **EMA 20/50:** [Extracted values and support/resistance behavior]\n\n"
+                        "- **RSI (14):** [Value] - [Explanation context]\n"
+                        "- **EMA 20/50:** [Value] - [Explanation context]\n\n"
                         "🎯 **Trader Take (Long/Short):**\n"
-                        "[Actionable institutional execution strategy with precise levels]."
+                        "[Actionable institutional execution strategy].\n\n"
+                        "CRITICAL INSTRUCTION: You MUST write the ENTIRE explanation, context, and strategy in the EXACT SAME LANGUAGE as the user's prompt. "
+                        "If the user asks in Indonesian, ALL descriptions MUST be in professional Indonesian language. Do not mix languages."
                     )
                 },
                 {
@@ -138,7 +170,7 @@ async def analyze_image(file: UploadFile = File(...)):
                     "content": [
                         {
                             "type": "text",
-                            "text": "Analyze this market chart and provide precise technical breakdown."
+                            "text": user_text
                         },
                         {
                             "type": "image_url",
@@ -149,7 +181,7 @@ async def analyze_image(file: UploadFile = File(...)):
                     ]
                 }
             ],
-            max_tokens=500
+            max_tokens=600
         )
 
         reply_text = response.choices[0].message.content
