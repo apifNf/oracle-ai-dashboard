@@ -18,6 +18,8 @@ const initialTickers = top15Symbols.map(sym => ({
 
 export default function DashboardPage() {
   const [prompt, setPrompt] = useState("");
+  const [response, setResponse] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [tickers, setTickers] = useState(initialTickers);
   const [activeSignals, setActiveSignals] = useState<number | string>("Scanning...");
 
@@ -25,7 +27,6 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchTickers = async () => {
       try {
-        // Menggunakan Binance Vision API dengan parameter array Top 15 Koin
         const symbolsArray = top15Symbols.map(s => `"${s}USDT"`).join(",");
         const apiUrl = `https://data-api.binance.vision/api/v3/ticker/24hr?symbols=[${symbolsArray}]`;
         
@@ -37,7 +38,6 @@ export default function DashboardPage() {
             const price = parseFloat(item.lastPrice);
             const change = parseFloat(item.priceChangePercent);
             
-            // Format Harga Dinamis (Koin Micin vs Koin Besar)
             let formattedPrice;
             if (price < 0.001) formattedPrice = price.toFixed(6);
             else if (price < 1) formattedPrice = price.toFixed(4);
@@ -53,7 +53,6 @@ export default function DashboardPage() {
             };
           });
 
-        // 
         liveData.sort((a: any, b: any) => top15Symbols.indexOf(a.symbol) - top15Symbols.indexOf(b.symbol));
 
         if (liveData.length > 0) {
@@ -73,14 +72,50 @@ export default function DashboardPage() {
     fetchTickers();
     runScannerEngine();
     
-    const interval = setInterval(fetchTickers, 5000); // Update harga di-push tiap 5 detik agar lebih reaktif!
+    const interval = setInterval(fetchTickers, 5000); 
     return () => clearInterval(interval);
   }, []);
+
+  // 3. HANDLER UNTUK QUICK ASK ORACLE
+  const handleAskOracle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
+
+    setIsLoading(true);
+    setResponse(""); // Kosongkan respons sebelumnya
+    
+    try {
+      // Gunakan ENV Vercel jika ada, atau fallback langsung ke server Render Anda
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "https://oracle-ai-dashboard.onrender.com";
+      
+      const res = await fetch(`${baseUrl}/api/v1/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const data = await res.json();
+
+      if (data.status === "success") {
+        setResponse(data.reply);
+      } else {
+        setResponse(`[System Error]: ${data.reply}`);
+      }
+    } catch (error) {
+      console.error("Chat API Error:", error);
+      setResponse("[Connection Error]: Gagal terhubung ke Core AI di server Render. Pastikan backend berstatus Live.");
+    } finally {
+      setIsLoading(false);
+      setPrompt(""); // Kosongkan form setelah mengirim
+    }
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 dark:bg-[#09090b] text-slate-900 dark:text-zinc-100 overflow-x-hidden transition-colors duration-300">
       
-      {/* 3. LIVE MARKET TICKER */}
+      {/* LIVE MARKET TICKER */}
       <div className="w-full bg-white dark:bg-[#111113] border-b border-slate-200 dark:border-zinc-800/50 flex items-center overflow-hidden h-12 relative transition-colors duration-300">
         <div className="absolute left-0 z-10 w-24 h-full bg-gradient-to-r from-white dark:from-[#111113] to-transparent pointer-events-none transition-colors duration-300"></div>
         <div className="absolute right-0 z-10 w-24 h-full bg-gradient-to-l from-white dark:from-[#111113] to-transparent pointer-events-none transition-colors duration-300"></div>
@@ -93,7 +128,6 @@ export default function DashboardPage() {
           .animate-ticker {
             display: flex;
             width: fit-content;
-            /* SPEED BOOST: Animasi */
             animation: ticker 30s linear infinite;
           }
           .animate-ticker:hover {
@@ -201,19 +235,41 @@ export default function DashboardPage() {
           </div>
           
           <div className="p-6">
-            <div className="relative flex items-center bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl shadow-inner focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/50 transition-all">
+            {/* Form dibungkus tag <form> agar tombol "Enter" di keyboard berfungsi */}
+            <form onSubmit={handleAskOracle} className="relative flex items-center bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl shadow-inner focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/50 transition-all">
               <input
                 type="text"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                disabled={isLoading}
                 placeholder="Ask about macro events, BTC structure, or fetch a quick analysis..."
-                className="w-full bg-transparent border-none py-4 px-4 text-[15px] text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-0"
+                className="w-full bg-transparent border-none py-4 px-4 text-[15px] text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-0 disabled:opacity-50"
               />
-              <button className="absolute right-2 p-2 bg-emerald-100 dark:bg-emerald-600/20 text-emerald-600 dark:text-emerald-500 hover:bg-emerald-500 hover:text-white rounded-lg transition-colors flex items-center justify-center">
-                <Send className="w-4 h-4" />
+              <button 
+                type="submit"
+                disabled={isLoading || !prompt.trim()}
+                className="absolute right-2 p-2 bg-emerald-100 dark:bg-emerald-600/20 text-emerald-600 dark:text-emerald-500 hover:bg-emerald-500 hover:text-white rounded-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? <Radar className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
-            </div>
+            </form>
             
+            {/* AREA OUTPUT JAWABAN AI */}
+            {(isLoading || response) && (
+              <div className="mt-4 p-5 rounded-xl bg-slate-50/50 dark:bg-zinc-900/50 border border-slate-100 dark:border-zinc-800/80 transition-all duration-300">
+                {isLoading ? (
+                  <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-500">
+                    <BrainCircuit className="w-5 h-5 animate-pulse" />
+                    <span className="text-sm font-medium animate-pulse">ORACLE is analyzing market structure...</span>
+                  </div>
+                ) : (
+                  <div className="text-[15px] text-slate-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">
+                    {response}
+                  </div>
+                )}
+              </div>
+            )}
+
             <p className="mt-4 text-xs text-slate-500 dark:text-zinc-500 font-mono transition-colors duration-300">
               <span className="text-emerald-600 dark:text-emerald-500 font-bold">System:</span> Ready to process natural language queries. Target API: /v1/chat
             </p>
