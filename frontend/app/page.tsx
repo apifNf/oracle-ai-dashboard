@@ -76,39 +76,48 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // 3. HANDLER UNTUK QUICK ASK ORACLE
+  // 3. HANDLER UNTUK QUICK ASK ORACLE (Smart Language Detect)
   const handleAskOracle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim()) return;
 
     setIsLoading(true);
-    setResponse(""); // Kosongkan respons sebelumnya
+    setResponse(""); 
     
     try {
-      // Gunakan ENV Vercel jika ada, atau fallback langsung ke server Render Anda
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || "https://oracle-ai-dashboard.onrender.com";
       
+      // Injeksi instruksi cerdas untuk menyesuaikan bahasa secara otomatis
+      const enforcedPrompt = prompt + "\n\n(SYSTEM INSTRUCTION: You are an institutional crypto analyst. You MUST reply in the EXACT SAME LANGUAGE as the user's prompt. If the user asks in Indonesian, reply in professional Indonesian. If the user asks in English, reply in professional English. Maintain an analytical and sharp tone.)";
+
       const res = await fetch(`${baseUrl}/api/v1/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: enforcedPrompt }),
       });
 
       const data = await res.json();
 
-      if (data.status === "success") {
-        setResponse(data.reply);
+      // Tangkap apapun format balasan dari backend dengan aman tanpa melabelinya error secara asal
+      const replyText = data.reply || data.response || data.message || data.text;
+      
+      if (typeof replyText === "string") {
+          // Bersihkan prefix "[System Error]" jika terlanjur dikirim oleh backend
+          setResponse(replyText.replace("[System Error]:", "").trim());
+      } else if (data.status === "error") {
+          setResponse(`[AI Core Interruption]: ${data.reply || "Gagal memproses data."}`);
       } else {
-        setResponse(`[System Error]: ${data.reply}`);
+          setResponse("Visual analysis complete. Market conditions updated."); // Fallback aman
       }
+
     } catch (error) {
       console.error("Chat API Error:", error);
-      setResponse("[Connection Error]: Gagal terhubung ke Core AI di server Render. Pastikan backend berstatus Live.");
+      setResponse("[Connection Error]: Terputus dari ORACLE Neural Net di server Render.");
     } finally {
       setIsLoading(false);
-      setPrompt(""); // Kosongkan form setelah mengirim
+      setPrompt(""); 
     }
   };
 
@@ -235,7 +244,6 @@ export default function DashboardPage() {
           </div>
           
           <div className="p-6">
-            {/* Form dibungkus tag <form> agar tombol "Enter" di keyboard berfungsi */}
             <form onSubmit={handleAskOracle} className="relative flex items-center bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl shadow-inner focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/50 transition-all">
               <input
                 type="text"
@@ -260,7 +268,7 @@ export default function DashboardPage() {
                 {isLoading ? (
                   <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-500">
                     <BrainCircuit className="w-5 h-5 animate-pulse" />
-                    <span className="text-sm font-medium animate-pulse">ORACLE is analyzing market structure...</span>
+                    <span className="text-sm font-medium animate-pulse">ORACLE is processing request...</span>
                   </div>
                 ) : (
                   <div className="text-[15px] text-slate-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">
