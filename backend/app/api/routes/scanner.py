@@ -1,11 +1,14 @@
+import os
 import asyncio
 import time
 import random
+import requests
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.indicators.engine import IndicatorEngine
 
 router = APIRouter()
 
+# Daftar 30 Aset ORACLE
 COINS = [
     ("BTC", "BTC/USDT", 64200.0, 800.0),
     ("ETH", "ETH/USDT", 3450.0, 50.0),
@@ -99,12 +102,38 @@ def calculate_signal(indicators):
 def get_market_data():
     engine = IndicatorEngine()
     results = []
+    binance_prices = {}
 
+    # 1. Menarik data Real-Time dari Binance untuk semua 30 koin sekaligus
+    try:
+        api_key = os.getenv("BINANCE_API_KEY")
+        headers = {"X-MBX-APIKEY": api_key} if api_key else {}
+        
+        # Mengekstrak simbol dari list COINS dan membentuknya menjadi string array untuk Binance API
+        symbols_list = [coin[1].replace("/", "") for coin in COINS]
+        symbols_str = '["' + '","'.join(symbols_list) + '"]'
+        
+        url = f"https://api.binance.com/api/v3/ticker/24hr?symbols={symbols_str}"
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            for item in data:
+                # Mengubah kembali BTCUSDT menjadi BTC/USDT agar sesuai dengan patokan ORACLE
+                pair_name = item["symbol"].replace("USDT", "/USDT")
+                binance_prices[pair_name] = float(item["lastPrice"])
+    except Exception as e:
+        print(f"Binance fetch error: {e}")
+
+    # 2. Membangun data akhir untuk setiap aset
     for i, coin_data in enumerate(COINS):
         coin = coin_data[0]
         pair = coin_data[1]
-        base_price = coin_data[2]
+        default_base_price = coin_data[2]
         volatility = coin_data[3]
+
+        # Menggunakan harga asli Binance jika berhasil ditarik, jika gagal fallback ke default
+        base_price = binance_prices.get(pair, default_base_price)
 
         try:
             indicators = engine.analyze(pair)
@@ -129,6 +158,8 @@ def get_market_data():
         signal_data = calculate_signal(indicators)
         results.append({
             "coin": coin,
+            "pair": pair,
+            "current_price": base_price, # Harga asli diturunkan ke frontend
             **signal_data
         })
 
