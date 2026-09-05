@@ -48,7 +48,11 @@ type Envelope<T> = {
 /** Kondisi panel di UI. "error" WAJIB dibedakan dari "empty". */
 type PanelState = "loading" | "ok" | "empty" | "error";
 
-const API_BASE = "/api/v1/market-intel";
+// Backend FastAPI (absolut), konsisten dengan scanner & ai-chat. URL relatif
+// sebelumnya ("/api/v1/market-intel") menabrak origin Next.js yang tidak punya
+// route itu -> selalu 404.
+const API_ROOT = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE = `${API_ROOT}/api/v1/market-intel`;
 const ONCHAIN_REFRESH_MS = 30_000;
 const NEWS_REFRESH_MS = 120_000;
 

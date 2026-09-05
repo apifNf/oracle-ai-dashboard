@@ -14,9 +14,27 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://oracle:oracle@localhost:5432/oracle"
 
+    # --- Model providers -------------------------------------------------- #
     openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+
     binance_api_key: str | None = None
     binance_api_secret: str | None = None
+
+    # --- Dual-model AI router (Misi 3) ---------------------------------- #
+    # TIER 1 = percakapan umum / sapaan / istilah dasar.
+    # TIER 2 = "FABLE 5", reasoning engine kuant (Claude Sonnet/Opus).
+    tier1_model: str = "gpt-4o"
+    fable5_model: str = "claude-sonnet-5"
+
+    # --- Market Intelligence (Misi 1) --------------------------------- #
+    # Ambang transaksi whale on-chain dalam USD.
+    whale_threshold_usd: float = 500_000.0
+    # Endpoint JSON-RPC Ethereum publik (tanpa API key). Boleh dioverride.
+    eth_rpc_url: str = "https://ethereum-rpc.publicnode.com"
+    # Interval polling worker (detik).
+    rss_poll_seconds: int = 300
+    onchain_poll_seconds: int = 20
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod

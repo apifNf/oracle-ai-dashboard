@@ -39,11 +39,12 @@ SCANNER_PAIRS: tuple[str, ...] = (
     "POL/USDT", "UNI/USDT", "LTC/USDT", "BCH/USDT", "ETC/USDT",
     "FIL/USDT", "ICP/USDT", "VET/USDT", "NEAR/USDT", "OP/USDT",
     "ARB/USDT", "INJ/USDT", "RENDER/USDT", "ATOM/USDT", "IMX/USDT",
-    "STX/USDT", "KAS/USDT", "TAO/USDT", "S/USDT", "SUI/USDT",
+    "STX/USDT", "TRX/USDT", "TAO/USDT", "S/USDT", "SUI/USDT",
 )
 
 TICKER_STALE_SECONDS = 30           # di atas ini, harga dianggap basi
 INDICATOR_REFRESH_SECONDS = 300     # klines 1h — tidak ada gunanya lebih cepat
+INDICATOR_WARMUP_RETRY_SECONDS = 15 # saat belum ada aset OK (mis. baru boot)
 INDICATOR_CONCURRENCY = 4
 BROADCAST_INTERVAL_SECONDS = 5
 
@@ -370,18 +371,25 @@ class IndicatorCache:
 
     async def _loop(self, stream: BinanceStreamManager) -> None:
         while True:
+            ok_count = 0
             try:
-                await self.refresh(stream)
+                ok_count = await self.refresh(stream)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Refresh indikator gagal; mencoba siklus berikutnya.")
-            await asyncio.sleep(INDICATOR_REFRESH_SECONDS)
+            # Setelah boot, ticker butuh beberapa detik untuk terisi lewat REST
+            # snapshot + stream. Kalau belum ada satu pun aset OK, jangan tunggu
+            # 5 menit penuh — coba lagi cepat sampai konvergen.
+            delay = (
+                INDICATOR_REFRESH_SECONDS if ok_count > 0 else INDICATOR_WARMUP_RETRY_SECONDS
+            )
+            await asyncio.sleep(delay)
 
-    async def refresh(self, stream: BinanceStreamManager) -> None:
+    async def refresh(self, stream: BinanceStreamManager) -> int:
         pairs = list(stream.tickers.keys())
         if not pairs:
-            return
+            return 0
 
         # Gerbang dari harga live diteruskan ke engine. Kunci dict-nya adalah
         # pasangan penuh ("BTC/USDT"), sama persis dengan yang diminta engine —
@@ -398,6 +406,7 @@ class IndicatorCache:
 
         ok_count = sum(1 for r in results.values() if r.get("status") == "ok")
         logger.info("Indikator diperbarui: %d/%d aset ok.", ok_count, len(results))
+        return ok_count
 
     def get(self, pair: str) -> dict[str, Any] | None:
         return self._data.get(pair)
@@ -531,8 +540,15 @@ class ScannerHub:
     async def start(self) -> None:
         await self.stream.start()
         await self.indicators.start(self.stream)
-        # Hitung indikator sekali di awal agar klien pertama tidak melihat
-        # seluruh daftar berstatus "pending" selama lima menit.
+        # Beri stream kesempatan mengisi harga (REST snapshot + tick pertama)
+        # sebelum refresh awal — kalau tidak, gerbang status pasar menolak
+        # SEMUA aset dan kartu scanner tampil "Dihentikan" sampai siklus 5 menit
+        # berikutnya. Tunggu maksimal ~8 detik sampai mayoritas ticker punya harga.
+        for _ in range(16):
+            await asyncio.sleep(0.5)
+            priced = sum(1 for t in self.stream.tickers.values() if t.price is not None)
+            if self.stream.tickers and priced >= len(self.stream.tickers) * 0.6:
+                break
         with contextlib.suppress(Exception):
             await self.indicators.refresh(self.stream)
         self._task = asyncio.create_task(self._broadcast_loop(), name="scanner-hub")
@@ -679,6 +695,31 @@ async def scanner_health(request: Request) -> dict[str, Any]:
         ),
         "clients": len(hub._clients),
     }
+
+
+@router.get("/scanner/detail/{coin}")
+async def scanner_detail(coin: str, request: Request, interval: str = "1h") -> dict[str, Any]:
+    """
+    Detail per aset + timeframe untuk panel chart di kartu scanner.
+
+    Frontend (scanner/page.tsx) memanggil GET /api/v1/scanner/detail/{coin}?interval=…
+    tapi route ini sebelumnya tidak ada — panel candle selalu 404. Perhitungan
+    memakai IndicatorEngine milik hub (klien httpx yang sama, tidak membuka
+    koneksi baru per request), lalu ditempeli live_price dari ticker stream.
+    """
+    hub = _hub(request)
+    symbol = coin.strip().upper()
+    pair = symbol if "/" in symbol else f"{symbol}/USDT"
+
+    valid_intervals = {"15m", "1h", "4h", "1d"}
+    if interval not in valid_intervals:
+        interval = "1h"
+
+    payload = await hub.engine.analyze(pair, interval=interval)
+
+    ticker = hub.stream.tickers.get(pair)
+    payload["live_price"] = ticker.price if ticker is not None else None
+    return payload
 
 
 @router.websocket("/ws/scanner")
