@@ -125,6 +125,12 @@ async def lifespan(app: FastAPI):
                     await component.stop()
                 except Exception:
                     logger.exception("Shutdown %s gagal.", name)
+        trade_engine = getattr(app.state, "trade_engine", None)
+        if trade_engine is not None and hasattr(trade_engine, "aclose"):
+            try:
+                await trade_engine.aclose()
+            except Exception:
+                logger.exception("Shutdown trade_engine gagal.")
         ai_router = getattr(app.state, "ai_router", None)
         if ai_router is not None and hasattr(ai_router, "aclose"):
             try:

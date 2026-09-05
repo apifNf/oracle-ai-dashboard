@@ -148,6 +148,11 @@ export default function DashboardPage() {
         replyText = formatFable5Decision(data.decision);
       }
 
+      // Buang blok metadata proposal (@@ORACLE_PROPOSAL@@ {...}) dari tampilan teks.
+      if (replyText) {
+        replyText = replyText.replace(/@@ORACLE_PROPOSAL@@\s*\{[\s\S]*?\}\s*$/m, "").trimEnd();
+      }
+
       setResponse(replyText ?? "Analisa selesai. Kondisi pasar diperbarui.");
     } catch (error) {
       console.error("AI Router Error:", error);

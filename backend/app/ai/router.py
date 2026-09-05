@@ -56,6 +56,13 @@ _COMPARISON_HINTS = (
     "perbandingan", "compare", "comparison", "lebih baik", "lebih bagus",
     "mana yang lebih", "which is better",
 )
+# Permintaan setup / tiket trade -> analysis mode + blok proposal @@ORACLE_PROPOSAL@@.
+_SETUP_HINTS = (
+    "tiket trade", "trade ticket", "siapkan tiket", "buatkan tiket", "bikin tiket",
+    "trade setup", "setup trade", "siapkan setup", "buatkan setup", "bikin setup",
+    "trade plan", "rencana trade", "entry plan", "rencana entry", "trade idea",
+    "ide trade", "siapkan entry", "setup entry", "kasih setup", "buatkan rencana",
+)
 
 # Kata umum ID/EN yang bertabrakan dengan ticker (mis. "mana", "ada", "atau").
 # Token uppercase-asli di prompt tetap lolos; hanya jalur fallback (lowercase
@@ -160,6 +167,8 @@ class AIModelRouter:
         low = f" {req.prompt.lower()} "
         if any(h in low for h in _ORDER_PARAM_HINTS):
             return 2, "execution", "prompt_contains_order_parameters"
+        if any(h in low for h in _SETUP_HINTS):
+            return 2, "analysis", "trade_setup_request"
 
         symbols = self.detect_symbols(req)
         if len(symbols) >= 2 or any(h in low for h in _COMPARISON_HINTS):

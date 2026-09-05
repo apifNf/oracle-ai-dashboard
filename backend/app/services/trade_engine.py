@@ -43,12 +43,41 @@ class TradeEngine:
         self._engine = indicator_engine
         self._scanner_hub = scanner_hub
         self._ccxt_client: Any = None
+        self._http: Any = None
+
+    async def aclose(self) -> None:
+        if self._http is not None:
+            try:
+                await self._http.aclose()
+            except Exception:
+                pass
+            self._http = None
+
+    # ---------------------- normalisasi simbol -------------------- #
+
+    @staticmethod
+    def _normalize_pair(symbol: str) -> str:
+        """'SOLUSDT' / 'SOL' / 'SOL/USDT' / 'sol_usdt' -> 'SOL/USDT'."""
+        s = (symbol or "").upper().replace("_", "/").strip()
+        if "/" in s:
+            base, _, quote = s.partition("/")
+            return f"{base}/{quote or 'USDT'}"
+        for q in ("USDT", "USDC", "BUSD", "USD"):
+            if s.endswith(q) and len(s) > len(q):
+                return f"{s[:-len(q)]}/{q}"
+        return f"{s}/USDT"
 
     # ---------------------- harga acuan ----------------------------- #
 
     async def reference_price(self, symbol: str) -> float | None:
-        """Harga entry acuan untuk MARKET order: ticker scanner -> IndicatorEngine."""
-        pair = symbol if "/" in symbol else f"{symbol}/USDT"
+        """
+        Harga live untuk entry MARKET / exit close.
+        Urutan: ticker stream scanner -> ticker live Binance (langsung) ->
+        IndicatorEngine klines.
+        """
+        pair = self._normalize_pair(symbol)            # "SOL/USDT"
+        binance_symbol = pair.replace("/", "")         # "SOLUSDT"
+
         if self._scanner_hub is not None:
             try:
                 tick = self._scanner_hub.stream.tickers.get(pair)
@@ -56,6 +85,11 @@ class TradeEngine:
                     return float(tick.price)
             except Exception:
                 pass
+
+        price = await self._binance_ticker_price(binance_symbol)
+        if price is not None:
+            return price
+
         if self._engine is not None:
             try:
                 data = await self._engine.analyze(pair, interval="1h")
@@ -63,6 +97,29 @@ class TradeEngine:
                     return float(data["price"])
             except Exception:
                 logger.exception("reference_price: analyze gagal untuk %s", pair)
+        return None
+
+    async def _binance_ticker_price(self, binance_symbol: str) -> float | None:
+        """GET /api/v3/ticker/price — harga pasar terkini, tanpa API key."""
+        import httpx
+
+        if self._http is None:
+            self._http = httpx.AsyncClient(
+                timeout=httpx.Timeout(8.0),
+                headers={"User-Agent": "ORACLE-Dashboard/1.0 (+trade engine)"},
+            )
+        for base in ("https://api.binance.com", "https://data-api.binance.vision"):
+            try:
+                resp = await self._http.get(
+                    f"{base}/api/v3/ticker/price", params={"symbol": binance_symbol}
+                )
+                if resp.status_code != 200:
+                    continue
+                price = float(resp.json().get("price", 0) or 0)
+                if price > 0:
+                    return price
+            except Exception:
+                continue
         return None
 
     # ---------------------- proposal / sizing --------------------- #

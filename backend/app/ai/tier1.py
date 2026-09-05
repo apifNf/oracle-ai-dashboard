@@ -43,6 +43,14 @@ _SYSTEM = (
     "   - **Invalidation:** <the price level that flips the read, one line>\n"
     "3. A line `**Bottom Line:**` then ONE neutral sentence.\n"
     "\n"
+    "TRADE PROPOSAL BLOCK — if the user asked for a trade setup/ticket/plan, OR the "
+    "read gives a clear directional bias with a sensible invalidation level, append "
+    "this as the VERY LAST line (nothing after it), exact format:\n"
+    "@@ORACLE_PROPOSAL@@ {\"asset\":\"<TICKER>\",\"side\":\"BUY\"|\"SELL\",\"entry\":<num>,\"sl\":<num>,\"tp\":[<num>,<num>],\"risk_rr\":[<num>,<num>]}\n"
+    "entry = injected live price; sl just beyond nearest support (BUY) / resistance "
+    "(SELL); tp = next 1-2 levels; risk_rr = |tp-entry|/|entry-sl|. Plain numbers, "
+    "valid JSON on one line. No clean setup -> omit the block.\n"
+    "\n"
     "RULES: bullet points only, no paragraphs, no encyclopedia explanations, no "
     "\"pasti\"/\"definitely\", no guaranteed targets, no \"Execute Trade\" mentions. "
     "If a coin's metrics are under synchronization, say so in one line and skip its "
@@ -96,7 +104,7 @@ class Tier1Conversational:
             response = client.chat.completions.create(
                 model=self._model,
                 messages=messages,
-                max_tokens=420,   # kunci biaya output (Tugas 1)
+                max_tokens=480,   # kunci biaya output (Tugas 1) + blok proposal
                 temperature=0.3,
             )
         except Exception as exc:

@@ -124,6 +124,63 @@ export async function closeTrade(accountId: string, tradeId: string, exitPrice?:
   });
 }
 
+/** Harga pasar live untuk satu simbol (dipakai Journal saat menutup posisi). */
+export async function fetchLivePrice(symbol: string): Promise<number | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/v1/trade/price?symbol=${encodeURIComponent(symbol)}`,
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data?.price === "number" ? data.price : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cari blok proposal `@@ORACLE_PROPOSAL@@ {json}` di akhir respons AI.
+ * Return params untuk TradeProposalTicket + teks yang sudah dibersihkan dari blok.
+ */
+export function extractProposalFromText(
+  text: string,
+  accountId: string,
+): { params: ProposalParams | null; cleanedText: string } {
+  if (!text) return { params: null, cleanedText: text };
+  const re = /@@ORACLE_PROPOSAL@@\s*(\{[\s\S]*?\})\s*$/m;
+  const m = text.match(re);
+  if (!m) return { params: null, cleanedText: text };
+
+  const cleanedText = text.replace(m[0], "").trimEnd();
+  try {
+    const raw = JSON.parse(m[1]);
+    const side: TradeSide = String(raw.side).toUpperCase() === "SELL" ? "SELL" : "BUY";
+    const asset = String(raw.asset || "").toUpperCase().replace("/", "");
+    const sl = Number(raw.sl);
+    if (!asset || !Number.isFinite(sl) || sl <= 0) {
+      return { params: null, cleanedText };
+    }
+    const tp = Array.isArray(raw.tp)
+      ? raw.tp.map(Number).filter((n: number) => Number.isFinite(n) && n > 0)
+      : [];
+    const entry = Number(raw.entry);
+    return {
+      params: {
+        account_id: accountId,
+        symbol: asset.endsWith("USDT") ? asset : `${asset}USDT`,
+        side,
+        stop_loss: sl,
+        take_profit: tp,
+        entry_price: Number.isFinite(entry) && entry > 0 ? entry : null,
+        order_type: "MARKET",
+      },
+      cleanedText,
+    };
+  } catch {
+    return { params: null, cleanedText };
+  }
+}
+
 /**
  * Turunkan parameter proposal dari keputusan FABLE 5 (execution mode).
  * order_payload tidak memuat entry price -> server yang mengisi (harga acuan).

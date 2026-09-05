@@ -136,6 +136,17 @@ async def trade_account(request: Request, account_id: str = "default") -> dict[s
     return {"status": "ok", "account": summary}
 
 
+@router.get("/price")
+async def trade_price(request: Request, symbol: str) -> dict[str, Any]:
+    """Harga pasar live untuk satu simbol (dipakai frontend saat menutup posisi)."""
+    price = await _engine(request).reference_price(symbol)
+    if price is None:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Harga live {symbol} tidak tersedia saat ini."
+        )
+    return {"status": "ok", "symbol": symbol.upper(), "price": price}
+
+
 @router.get("/journal")
 async def trade_journal(request: Request, account_id: str = "default", limit: int = 100) -> dict[str, Any]:
     rows = await asyncio.to_thread(_store(request).list_trades, account_id, limit)
@@ -203,12 +214,26 @@ async def trade_close(body: CloseRequest, request: Request) -> dict[str, Any]:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Trade sudah {trade['status']}.")
 
     exit_price = body.exit_price
-    if not exit_price or exit_price <= 0:
+    price_source = "client"
+    if not exit_price or float(exit_price) <= 0:
         exit_price = await engine.reference_price(trade["symbol"])
+        price_source = "live_market"
         if exit_price is None:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Harga keluar tidak tersedia; kirim exit_price.")
+            # Jaring pengaman terakhir: tutup di harga masuk (PnL ~0) daripada
+            # menggagalkan aksi user. Backend sudah mencoba ticker Binance live.
+            exit_price = trade.get("filled_price") or trade["entry_price"]
+            price_source = "entry_fallback"
 
     pnl = engine.compute_pnl(trade, float(exit_price))
-    closed = await asyncio.to_thread(store.close_trade, body.account_id, body.trade_id, round(float(exit_price), 8), pnl)
+    closed = await asyncio.to_thread(
+        store.close_trade, body.account_id, body.trade_id, round(float(exit_price), 8), pnl
+    )
     summary = await asyncio.to_thread(store.account_summary, body.account_id)
-    return {"status": "ok", "trade": closed, "realized_pnl_usdt": round(pnl, 2), "account": summary}
+    return {
+        "status": "ok",
+        "trade": closed,
+        "exit_price": round(float(exit_price), 8),
+        "price_source": price_source,
+        "realized_pnl_usdt": round(pnl, 2),
+        "account": summary,
+    }

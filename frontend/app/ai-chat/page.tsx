@@ -6,7 +6,7 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { cn } from "@/lib/utils";
 import { formatFable5Decision } from "@/lib/fable5";
 import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
-import { proposalParamsFromDecision } from "@/lib/trade";
+import { proposalParamsFromDecision, extractProposalFromText, type ProposalParams } from "@/lib/trade";
 
 type Message = {
   role: "user" | "oracle" | "system";
@@ -15,6 +15,7 @@ type Message = {
   contextInjected?: boolean;
   imageUrl?: string;
   decision?: any;
+  proposalParams?: ProposalParams | null;
 };
 
 export default function AiChatPage() {
@@ -115,17 +116,21 @@ export default function AiChatPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         data = await res.json();
 
-        const content =
+        const rawContent =
           (typeof data.reply === "string" && data.reply.trim()) ||
           (data.decision ? formatFable5Decision(data.decision) : "") ||
           "Analysis complete.";
 
+        // Deteksi blok @@ORACLE_PROPOSAL@@ di akhir respons -> render ticket.
+        const { params: textParams, cleanedText } = extractProposalFromText(rawContent, accountId);
+
         setMessages((prev) => [...prev, {
           role: "oracle",
-          content,
+          content: cleanedText || rawContent,
           symbols: data.detected_symbol ? [data.detected_symbol] : undefined,
           contextInjected: Boolean(data.metrics_used) || Boolean(data.decision),
           decision: data.decision,
+          proposalParams: textParams,
         }]);
       }
     } catch (err) {
@@ -197,13 +202,17 @@ export default function AiChatPage() {
                 {msg.content}
               </div>
 
-              {msg.decision && proposalParamsFromDecision(msg.decision, accountId) && (
-                <div className="w-full sm:min-w-[420px]">
-                  <TradeProposalTicket
-                    params={proposalParamsFromDecision(msg.decision, accountId)!}
-                  />
-                </div>
-              )}
+              {(() => {
+                const ticketParams =
+                  (msg.decision && proposalParamsFromDecision(msg.decision, accountId)) ||
+                  msg.proposalParams ||
+                  null;
+                return ticketParams ? (
+                  <div className="w-full sm:min-w-[420px]">
+                    <TradeProposalTicket params={ticketParams} />
+                  </div>
+                ) : null;
+              })()}
             </div>
 
             {msg.role === "user" && (

@@ -111,7 +111,15 @@ OUTPUT FORMAT (strict — keep the WHOLE reply under ~300 tokens, no preamble):
    - **Invalidation:** the level(s) that flip the read, one line
 3. A line `**Bottom Line:**` then ONE neutral sentence naming which asset is technically stronger right now (or "seimbang"/"balanced").
 
-RULES: bullets only, no paragraphs, no encyclopedia, no "pasti"/"definitely", no targets stated as certainty, no position sizing / leverage / order instructions, no "Execute Trade" mentions. A coin under synchronization -> one line, skip its row. Reply in the SAME LANGUAGE as the user."""
+TRADE PROPOSAL BLOCK — append this when the user asked for a trade setup/ticket/plan, OR the read gives a clear single-asset directional bias with a sensible invalidation level. Make it the VERY LAST line, nothing after it, exact format:
+@@ORACLE_PROPOSAL@@ {"asset":"<TICKER>","side":"BUY"|"SELL","entry":<number>,"sl":<number>,"tp":[<number>,<number>],"risk_rr":[<number>,<number>]}
+- entry = the injected live price of that asset. side = BUY for a bullish read, SELL for bearish.
+- sl = just beyond the nearest structural level (below support for BUY, above resistance for SELL).
+- tp = the next 1-2 levels in the profit direction. risk_rr = |tp-entry| / |entry-sl| for each tp, 2 decimals.
+- Plain numbers only, no currency symbols, no thousands separators. Valid JSON on ONE line.
+- If there is no clean single-asset setup, do NOT append the block.
+
+RULES: bullets only, no paragraphs, no encyclopedia, no "pasti"/"definitely", no targets stated as certainty, no position sizing / leverage / order instructions in the prose, no "Execute Trade" mentions. A coin under synchronization -> one line, skip its row. Reply in the SAME LANGUAGE as the user."""
 
 
 # --------------------------------------------------------------------------- #

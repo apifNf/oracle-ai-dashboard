@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2 } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
-import { fetchJournal, fetchAccount, closeTrade, type TradeRecord } from "@/lib/trade";
+import { fetchJournal, fetchAccount, closeTrade, fetchLivePrice, type TradeRecord } from "@/lib/trade";
 
 type Trade = { id: number; pair: string; type: string; pnl: string; date: string; notes: string; };
 
@@ -42,12 +42,21 @@ export default function JournalPage() {
     return () => clearInterval(t);
   }, [loadEngine]);
 
-  const handleCloseExec = async (tradeId: string) => {
+  const handleCloseExec = async (tradeId: string, symbol: string) => {
     if (!window.confirm("Tutup posisi ini pada harga pasar saat ini?")) return;
     setClosingId(tradeId);
     try {
-      await closeTrade(accountId, tradeId);
+      // Kirim harga live jika tersedia; backend juga auto-fetch bila kosong.
+      const live = await fetchLivePrice(symbol);
+      const res = await closeTrade(accountId, tradeId, live ?? undefined);
       await loadEngine();
+      const pnl = res?.realized_pnl_usdt;
+      if (typeof pnl === "number") {
+        alert(
+          `Posisi ditutup @ $${money(res.exit_price ?? live ?? 0, 4)} (${res.price_source}). ` +
+            `PnL ${pnl >= 0 ? "+" : ""}$${money(pnl)}.`,
+        );
+      }
     } catch (e) {
       alert("Gagal menutup posisi: " + (e instanceof Error ? e.message : "unknown"));
     } finally {
@@ -274,7 +283,7 @@ export default function JournalPage() {
                     <td className="p-3">
                       {t.status === "OPEN" && t.mode === "PAPER_TRADING" && (
                         <button
-                          onClick={() => handleCloseExec(t.id)}
+                          onClick={() => handleCloseExec(t.id, t.symbol)}
                           disabled={closingId === t.id}
                           className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50"
                         >
