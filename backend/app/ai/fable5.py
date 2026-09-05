@@ -40,6 +40,7 @@ except Exception:  # pragma: no cover - defensive
 
 __all__ = [
     "FABLE5_SYSTEM_INSTRUCTION",
+    "FABLE5_ANALYSIS_INSTRUCTION",
     "Fable5Decision",
     "Fable5Engine",
     "Fable5Unavailable",
@@ -93,6 +94,28 @@ STRICT OUTPUT CONTRACT (enforced server-side):
 - `applied_leverage` is an integer between 1 and 3.
 - This platform performs MANUAL execution only. Your JSON is a proposal for a human to review; never claim an order was placed.
 """
+
+
+# --------------------------------------------------------------------------- #
+# Mode ANALISIS (bukan eksekusi) — dipakai untuk perbandingan aset & analisa
+# struktur pasar multi-dimensi dari AI Chat. Output = Markdown, bukan JSON.
+# --------------------------------------------------------------------------- #
+
+FABLE5_ANALYSIS_INSTRUCTION = """You are FABLE 5, the Senior Quantitative Strategist of the ORACLE AI Platform, operating in MULTI-DIMENSIONAL TECHNICAL ANALYSIS mode (NOT order-execution mode).
+
+Deliver a data-driven technical read. You are NOT a general encyclopedia and you do NOT emit a JSON order payload here.
+
+REQUIREMENTS:
+- Ground every statement in the LIVE METRICS provided (price, 24h change, RSI(14), EMA20/EMA50 cross, nearest support & resistance) plus the macro RSS and whale context. Do not substitute generic knowledge for the real numbers.
+- Open with a compact Markdown comparison table with columns exactly:
+  Aset | Harga | 24J % | RSI(14) | Tren (EMA20/50) | Support | Resistance
+  using the injected values verbatim.
+- Then give a multi-dimensional read covering: momentum (RSI level and zone), trend structure (EMA20/50 cross, price position vs the EMAs), key levels (how far price sits from nearest support / resistance, in %), 24h behaviour, and any relevant macro or whale flow.
+- When two or more assets are in scope, compare them head to head and state the relative technical standing with numbers (e.g. "ETH di atas EMA50 dengan RSI 54, sementara ZEC terkoreksi dengan RSI 41 dan 0.6% di atas support").
+- Stay neutral and probabilistic. Never say price "will" / "pasti" move a certain way. No guaranteed targets. No position sizing, leverage, or order instructions in this mode.
+- Do NOT tell the user to use an "Execute Trade" / auto-trade / Copy-Trading flow — that feature does not exist in the UI.
+- If a coin's live metrics are marked as under synchronization, say so for that coin and do not fabricate numbers.
+- Reply in the SAME LANGUAGE as the user. Markdown prose only, no JSON, no rigid disclaimers."""
 
 
 # --------------------------------------------------------------------------- #
@@ -188,19 +211,28 @@ class Fable5Engine:
         self,
         prompt: str,
         *,
+        mode: str = "execution",
         symbol: str | None = None,
         metrics_line: str | None = None,
         macro_context: str | None = None,
         whale_context: str | None = None,
         risk_params: dict[str, Any] | None = None,
         trigger: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | str:
         """
-        Kembalikan dict yang PASTI valid terhadap Fable5Decision (sudah
-        divalidasi). Tidak melempar untuk kegagalan kepatuhan model —
-        mengembalikan envelope DENIED.
+        mode="execution" (default): kembalikan dict yang PASTI valid terhadap
+        Fable5Decision (Misi 4). Tidak melempar untuk kegagalan kepatuhan model
+        — mengembalikan envelope DENIED.
+
+        mode="analysis": kembalikan STRING Markdown — analisa teknikal
+        multi-dimensi / perbandingan aset untuk AI Chat. Tanpa JSON.
         """
         client = self._get_client()
+
+        if mode == "analysis":
+            return await self._analyze_prose(
+                client, prompt, metrics_line, macro_context, whale_context
+            )
 
         user_block = self._build_user_block(
             prompt=prompt,
@@ -243,6 +275,51 @@ class Fable5Engine:
             "execution blocked by the server-side output guardrail.",
             symbol or "UNKNOWN",
         )
+
+    async def _analyze_prose(
+        self,
+        client: Any,
+        prompt: str,
+        metrics_ctx: str | None,
+        macro_context: str | None,
+        whale_context: str | None,
+    ) -> str:
+        """Mode analisis: Markdown teknikal multi-dimensi, tanpa enforcement JSON."""
+        user = "\n".join(
+            [
+                "[LIVE TECHNICAL METRICS — real-time from ORACLE backend]",
+                metrics_ctx or SYNC_SENTINEL,
+                "",
+                "[MACRO RSS CONTEXT]",
+                macro_context or "No macro headlines available.",
+                "",
+                "[WHALE / ON-CHAIN CONTEXT (> $500k)]",
+                whale_context or "No qualifying whale transfers in the recent window.",
+                "",
+                "[USER REQUEST]",
+                prompt,
+                "",
+                "Produce the Markdown comparison table first, then the "
+                "multi-dimensional technical read. Neutral tone, real numbers only.",
+            ]
+        )
+        try:
+            response = await client.messages.create(
+                model=self._model,
+                max_tokens=2200,
+                system=FABLE5_ANALYSIS_INSTRUCTION,
+                messages=[{"role": "user", "content": user}],
+                thinking={"type": "adaptive"},
+            )
+        except Exception as exc:
+            logger.exception("Panggilan Claude (FABLE 5 analysis) gagal.")
+            raise Fable5Unavailable(f"Claude API error: {type(exc).__name__}") from exc
+
+        return "".join(
+            block.text
+            for block in response.content
+            if getattr(block, "type", None) == "text"
+        ).strip()
 
     # ---------------------- internal ------------------------------- #
 

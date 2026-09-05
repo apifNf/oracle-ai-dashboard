@@ -90,7 +90,11 @@ async def lifespan(app: FastAPI):
 
         hub = app.state.scanner_hub
         engine = hub.engine if hub is not None else None
-        return AIModelRouter(store=app.state.market_intel_store, indicator_engine=engine)
+        return AIModelRouter(
+            store=app.state.market_intel_store,
+            indicator_engine=engine,
+            scanner_hub=hub,
+        )
 
     app.state.ai_router = await _safe_start("ai_router", _start_ai_router)
 

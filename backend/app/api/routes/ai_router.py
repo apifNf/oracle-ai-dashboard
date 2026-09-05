@@ -61,11 +61,15 @@ async def ai_route(body: AIRouteRequest, request: Request) -> dict[str, Any]:
 
 @router.post("/route/preview")
 async def ai_route_preview(body: AIRouteRequest, request: Request) -> dict[str, Any]:
-    tier, reason = _router(request).decide_tier(_to_router_request(body))
+    rt = _router(request)
+    req = _to_router_request(body)
+    tier, mode, reason = rt.decide_route(req)
     return {
         "status": "ok",
         "tier": tier,
+        "mode": mode,
         "routed_because": reason,
+        "detected_symbols": rt.detect_symbols(req),
         "model": "gpt-4o" if tier == 1 else "claude (FABLE 5)",
     }
 
