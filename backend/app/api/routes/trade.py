@@ -147,6 +147,17 @@ async def trade_price(request: Request, symbol: str) -> dict[str, Any]:
     return {"status": "ok", "symbol": symbol.upper(), "price": price}
 
 
+@router.get("/prices")
+async def trade_prices(request: Request, symbols: str) -> dict[str, Any]:
+    """
+    Harga live batch. `symbols` = daftar dipisah koma (BTC,ETHUSDT,SOL/USDT).
+    Dipakai polling floating / unrealized PnL di Journal (interval 3 detik).
+    """
+    syms = [s.strip() for s in symbols.split(",") if s.strip()][:50]
+    prices = await _engine(request).reference_prices(syms)
+    return {"status": "ok", "prices": prices}
+
+
 @router.get("/journal")
 async def trade_journal(request: Request, account_id: str = "default", limit: int = 100) -> dict[str, Any]:
     rows = await asyncio.to_thread(_store(request).list_trades, account_id, limit)

@@ -138,6 +138,22 @@ export async function fetchLivePrice(symbol: string): Promise<number | null> {
   }
 }
 
+/** Harga live batch untuk polling floating PnL — key = simbol Binance (BTCUSDT). */
+export async function fetchLivePrices(symbols: string[]): Promise<Record<string, number>> {
+  const uniq = Array.from(new Set(symbols.filter(Boolean)));
+  if (uniq.length === 0) return {};
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/v1/trade/prices?symbols=${encodeURIComponent(uniq.join(","))}`,
+    );
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data?.prices && typeof data.prices === "object" ? data.prices : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Cari blok proposal `@@ORACLE_PROPOSAL@@ {json}` di akhir respons AI.
  * Return params untuk TradeProposalTicket + teks yang sudah dibersihkan dari blok.

@@ -99,8 +99,7 @@ class TradeEngine:
                 logger.exception("reference_price: analyze gagal untuk %s", pair)
         return None
 
-    async def _binance_ticker_price(self, binance_symbol: str) -> float | None:
-        """GET /api/v3/ticker/price — harga pasar terkini, tanpa API key."""
+    def _get_http(self) -> Any:
         import httpx
 
         if self._http is None:
@@ -108,9 +107,14 @@ class TradeEngine:
                 timeout=httpx.Timeout(8.0),
                 headers={"User-Agent": "ORACLE-Dashboard/1.0 (+trade engine)"},
             )
+        return self._http
+
+    async def _binance_ticker_price(self, binance_symbol: str) -> float | None:
+        """GET /api/v3/ticker/price — harga pasar terkini, tanpa API key."""
+        http = self._get_http()
         for base in ("https://api.binance.com", "https://data-api.binance.vision"):
             try:
-                resp = await self._http.get(
+                resp = await http.get(
                     f"{base}/api/v3/ticker/price", params={"symbol": binance_symbol}
                 )
                 if resp.status_code != 200:
@@ -121,6 +125,57 @@ class TradeEngine:
             except Exception:
                 continue
         return None
+
+    async def reference_prices(self, symbols: list[str]) -> dict[str, float]:
+        """
+        Harga live batch untuk beberapa aset sekaligus (dipakai polling floating
+        PnL di Journal). Kunci hasil = simbol Binance ('BTCUSDT').
+        """
+        norm: dict[str, str] = {}
+        for s in symbols:
+            pair = self._normalize_pair(s)
+            norm[pair.replace("/", "")] = pair
+        if not norm:
+            return {}
+
+        out: dict[str, float] = {}
+        # 1. ticker stream scanner
+        if self._scanner_hub is not None:
+            for bsym, pair in norm.items():
+                try:
+                    tick = self._scanner_hub.stream.tickers.get(pair)
+                    if tick is not None and tick.price:
+                        out[bsym] = float(tick.price)
+                except Exception:
+                    pass
+
+        # 2. batch Binance untuk sisanya
+        missing = [b for b in norm if b not in out]
+        if missing:
+            import json as _json
+
+            http = self._get_http()
+            params = {"symbols": _json.dumps(missing, separators=(",", ":"))}
+            for base in ("https://api.binance.com", "https://data-api.binance.vision"):
+                try:
+                    resp = await http.get(f"{base}/api/v3/ticker/price", params=params)
+                    if resp.status_code != 200:
+                        continue
+                    rows = resp.json()
+                    for row in rows if isinstance(rows, list) else []:
+                        price = float(row.get("price", 0) or 0)
+                        if price > 0:
+                            out[str(row.get("symbol"))] = price
+                    break
+                except Exception:
+                    continue
+
+        # 3. fallback per-simbol untuk yang masih kosong
+        for bsym in [b for b in norm if b not in out]:
+            price = await self.reference_price(bsym)
+            if price is not None:
+                out[bsym] = price
+        return out
 
     # ---------------------- proposal / sizing --------------------- #
 
