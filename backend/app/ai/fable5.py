@@ -101,21 +101,17 @@ STRICT OUTPUT CONTRACT (enforced server-side):
 # struktur pasar multi-dimensi dari AI Chat. Output = Markdown, bukan JSON.
 # --------------------------------------------------------------------------- #
 
-FABLE5_ANALYSIS_INSTRUCTION = """You are FABLE 5, the Senior Quantitative Strategist of the ORACLE AI Platform, operating in MULTI-DIMENSIONAL TECHNICAL ANALYSIS mode (NOT order-execution mode).
+FABLE5_ANALYSIS_INSTRUCTION = """You are FABLE 5, ORACLE's quant strategist in TERMINAL ANALYSIS mode (not order-execution mode). Use ONLY the injected LIVE METRICS + macro/whale context. No JSON here, no generic-knowledge filler, never invent numbers.
 
-Deliver a data-driven technical read. You are NOT a general encyclopedia and you do NOT emit a JSON order payload here.
+OUTPUT FORMAT (strict — keep the WHOLE reply under ~300 tokens, no preamble):
+1. A Markdown table, one row per asset: Aset | Harga | 24J % | RSI(14) | EMA(20/50) | Support | Resistance
+2. A line `**Key Points:**` then EXACTLY 3 bullets:
+   - **Momentum:** compare RSI + EMA trend across the assets, one line
+   - **Whale/Volume Bias:** from the 24h moves + whale flow, one line ("n/a" if none)
+   - **Invalidation:** the level(s) that flip the read, one line
+3. A line `**Bottom Line:**` then ONE neutral sentence naming which asset is technically stronger right now (or "seimbang"/"balanced").
 
-REQUIREMENTS:
-- Ground every statement in the LIVE METRICS provided (price, 24h change, RSI(14), EMA20/EMA50 cross, nearest support & resistance) plus the macro RSS and whale context. Do not substitute generic knowledge for the real numbers.
-- Open with a compact Markdown comparison table with columns exactly:
-  Aset | Harga | 24J % | RSI(14) | Tren (EMA20/50) | Support | Resistance
-  using the injected values verbatim.
-- Then give a multi-dimensional read covering: momentum (RSI level and zone), trend structure (EMA20/50 cross, price position vs the EMAs), key levels (how far price sits from nearest support / resistance, in %), 24h behaviour, and any relevant macro or whale flow.
-- When two or more assets are in scope, compare them head to head and state the relative technical standing with numbers (e.g. "ETH di atas EMA50 dengan RSI 54, sementara ZEC terkoreksi dengan RSI 41 dan 0.6% di atas support").
-- Stay neutral and probabilistic. Never say price "will" / "pasti" move a certain way. No guaranteed targets. No position sizing, leverage, or order instructions in this mode.
-- Do NOT tell the user to use an "Execute Trade" / auto-trade / Copy-Trading flow — that feature does not exist in the UI.
-- If a coin's live metrics are marked as under synchronization, say so for that coin and do not fabricate numbers.
-- Reply in the SAME LANGUAGE as the user. Markdown prose only, no JSON, no rigid disclaimers."""
+RULES: bullets only, no paragraphs, no encyclopedia, no "pasti"/"definitely", no targets stated as certainty, no position sizing / leverage / order instructions, no "Execute Trade" mentions. A coin under synchronization -> one line, skip its row. Reply in the SAME LANGUAGE as the user."""
 
 
 # --------------------------------------------------------------------------- #
@@ -304,12 +300,14 @@ class Fable5Engine:
             ]
         )
         try:
+            # Tugas ini terikat format & ringkas — thinking dimatikan supaya
+            # output tetap padat dan murah (Tugas 1).
             response = await client.messages.create(
                 model=self._model,
-                max_tokens=2200,
+                max_tokens=600,
                 system=FABLE5_ANALYSIS_INSTRUCTION,
                 messages=[{"role": "user", "content": user}],
-                thinking={"type": "adaptive"},
+                thinking={"type": "disabled"},
             )
         except Exception as exc:
             logger.exception("Panggilan Claude (FABLE 5 analysis) gagal.")

@@ -41,6 +41,13 @@ async def lifespan(app: FastAPI):
 
     app.state.market_intel_store = MarketIntelStore()
 
+    # 1b. Trade Execution Engine + store (Tugas 2).
+    from app.services.trade_store import TradeStore
+
+    app.state.trade_store = TradeStore(
+        settings.trade_store_path, settings.paper_start_balance_usdt
+    )
+
     # 2. Scanner hub — 30 aset, RSI14/EMA20/EMA50 dari OHLCV (Misi 2).
     async def _start_scanner():
         from app.api.routes.scanner import ScannerHub
@@ -98,6 +105,16 @@ async def lifespan(app: FastAPI):
 
     app.state.ai_router = await _safe_start("ai_router", _start_ai_router)
 
+    # 6. Trade engine — pakai IndicatorEngine & ticker hub untuk harga acuan.
+    async def _start_trade_engine():
+        from app.services.trade_engine import TradeEngine
+
+        hub = app.state.scanner_hub
+        engine = hub.engine if hub is not None else None
+        return TradeEngine(indicator_engine=engine, scanner_hub=hub)
+
+    app.state.trade_engine = await _safe_start("trade_engine", _start_trade_engine)
+
     try:
         yield
     finally:
@@ -140,5 +157,6 @@ async def health() -> dict[str, object]:
             "rss_worker": getattr(app.state, "rss_worker", None) is not None,
             "onchain_worker": getattr(app.state, "onchain_worker", None) is not None,
             "ai_router": getattr(app.state, "ai_router", None) is not None,
+            "trade_engine": getattr(app.state, "trade_engine", None) is not None,
         },
     }

@@ -3,12 +3,14 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
   TrendingDown, TrendingUp, Minus, Activity, Wifi, WifiOff, Loader2, Lock,
-  AlertTriangle, Check, X, Clock, RefreshCw, ShieldAlert,
+  AlertTriangle, Check, X, Clock, RefreshCw, ShieldAlert, Ticket,
 } from "lucide-react";
 import { createChart, CandlestickSeries, ColorType } from "lightweight-charts";
 import { useTheme } from "next-themes";
 import { useAuth } from "@/components/auth/auth-provider";
 import { cn } from "@/lib/utils";
+import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
+import { proposalParamsFromSignal } from "@/lib/trade";
 
 /* ================================================================== */
 /* Tipe — cocok persis dengan payload ScannerHub.build_snapshot()      */
@@ -412,9 +414,11 @@ function DetailChart({ coin, isDark }: { coin: string; isDark: boolean }) {
 
 export default function ScannerPage() {
   const { resolvedTheme } = useTheme();
-  const { tier } = useAuth();
+  const { tier, user } = useAuth();
+  const accountId = user?.email || "default";
 
   const [mounted, setMounted] = useState(false);
+  const [proposeFor, setProposeFor] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [socketState, setSocketState] = useState<SocketState>("connecting");
   const [lastMessageAt, setLastMessageAt] = useState<number | null>(null);
@@ -733,6 +737,28 @@ export default function ScannerPage() {
                           )}
                         </div>
                       </div>
+
+                      {(item.signal === "LONG" || item.signal === "SHORT") && !isLocked && (
+                        <div className="pt-2" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() =>
+                              setProposeFor(proposeFor === item.coin ? null : item.coin)
+                            }
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 dark:border-emerald-500/30 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors"
+                          >
+                            <Ticket className="w-3.5 h-3.5" />
+                            {proposeFor === item.coin ? "Tutup proposal" : "Propose Trade"}
+                          </button>
+                          {proposeFor === item.coin &&
+                            proposalParamsFromSignal(item as any, accountId) && (
+                              <div className="mt-3">
+                                <TradeProposalTicket
+                                  params={proposalParamsFromSignal(item as any, accountId)!}
+                                />
+                              </div>
+                            )}
+                        </div>
+                      )}
 
                       {!isOpen && (
                         <p className="text-[10px] text-slate-400 dark:text-zinc-600 pt-1">

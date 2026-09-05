@@ -5,17 +5,21 @@ import { Brain, Send, User, Radar, Paperclip, Activity, X, ImageIcon, Lock, Zap 
 import { useAuth } from "@/components/auth/auth-provider";
 import { cn } from "@/lib/utils";
 import { formatFable5Decision } from "@/lib/fable5";
+import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
+import { proposalParamsFromDecision } from "@/lib/trade";
 
-type Message = { 
-  role: "user" | "oracle" | "system"; 
+type Message = {
+  role: "user" | "oracle" | "system";
   content: string;
   symbols?: string[];
   contextInjected?: boolean;
   imageUrl?: string;
+  decision?: any;
 };
 
 export default function AiChatPage() {
-  const { tier } = useAuth();
+  const { tier, user } = useAuth();
+  const accountId = user?.email || "default";
   const [messages, setMessages] = useState<Message[]>([
     { role: "oracle", content: "ORACLE System Online. What asset or market structure would you like to analyze today?" }
   ]);
@@ -121,6 +125,7 @@ export default function AiChatPage() {
           content,
           symbols: data.detected_symbol ? [data.detected_symbol] : undefined,
           contextInjected: Boolean(data.metrics_used) || Boolean(data.decision),
+          decision: data.decision,
         }]);
       }
     } catch (err) {
@@ -191,6 +196,14 @@ export default function AiChatPage() {
                 )}
                 {msg.content}
               </div>
+
+              {msg.decision && proposalParamsFromDecision(msg.decision, accountId) && (
+                <div className="w-full sm:min-w-[420px]">
+                  <TradeProposalTicket
+                    params={proposalParamsFromDecision(msg.decision, accountId)!}
+                  />
+                </div>
+              )}
             </div>
 
             {msg.role === "user" && (

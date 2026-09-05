@@ -26,6 +26,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [tickers, setTickers] = useState(initialTickers);
   const [activeSignals, setActiveSignals] = useState<number | string>("Scanning...");
+  const [ledger, setLedger] = useState<{ count: number; balance: number } | null>(null);
 
   // 2. ENGINE PENYEDOT HARGA (Jalur VIP Binance Vision anti-blokir)
   useEffect(() => {
@@ -87,14 +88,32 @@ export default function DashboardPage() {
       }
     };
 
+    // Trade Ledger — jumlah trade dieksekusi + saldo virtual dari Trade Engine.
+    const fetchLedger = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/trade/account?account_id=default`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const acc = data?.account;
+        if (acc) setLedger({ count: acc.total_trades ?? 0, balance: acc.balance_usdt ?? 0 });
+      } catch (error) {
+        console.error("Gagal memuat Trade Ledger:", error);
+      }
+    };
+
     fetchTickers();
     fetchActiveSignals();
+    fetchLedger();
 
     const tickerInterval = setInterval(fetchTickers, 5000);
     const signalInterval = setInterval(fetchActiveSignals, 10000);
+    const ledgerInterval = setInterval(fetchLedger, 15000);
     return () => {
       clearInterval(tickerInterval);
       clearInterval(signalInterval);
+      clearInterval(ledgerInterval);
     };
   }, []);
 
@@ -235,10 +254,10 @@ export default function DashboardPage() {
             glowColor="group-hover:shadow-[0_0_20px_rgba(99,102,241,0.15)] group-hover:border-indigo-500/50"
             href="/market-intelligence"
           />
-          <StatCard 
-            title="Trade Ledger" 
-            value="2"
-            subtitle="Recent executed positions logged" 
+          <StatCard
+            title="Trade Ledger"
+            value={ledger ? ledger.count.toString() : "…"}
+            subtitle={ledger ? `Paper balance $${ledger.balance.toLocaleString("en-US", { maximumFractionDigits: 0 })} · executed trades` : "Loading ledger…"}
             icon={<BookOpen className="w-5 h-5 text-purple-600 dark:text-purple-500" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] group-hover:border-purple-500/50"
             href="/journal"

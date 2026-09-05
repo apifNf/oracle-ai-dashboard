@@ -1,13 +1,60 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
-import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2 } from "lucide-react";
+import { useAuth } from "@/components/auth/auth-provider";
+import { fetchJournal, fetchAccount, closeTrade, type TradeRecord } from "@/lib/trade";
 
 type Trade = { id: number; pair: string; type: string; pnl: string; date: string; notes: string; };
 
+const money = (v: number | null | undefined, d = 2) =>
+  typeof v === "number" && Number.isFinite(v)
+    ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })
+    : "—";
+
 export default function JournalPage() {
+  const { user } = useAuth();
+  const accountId = user?.email || "default";
+
   const [mounted, setMounted] = useState(false);
-  
+
+  // --- Executed trades dari ORACLE Trade Engine (Tugas 2) --- #
+  const [execTrades, setExecTrades] = useState<TradeRecord[]>([]);
+  const [execAccount, setExecAccount] = useState<any>(null);
+  const [execLoading, setExecLoading] = useState(true);
+  const [closingId, setClosingId] = useState<string | null>(null);
+
+  const loadEngine = useCallback(async () => {
+    try {
+      const [j, a] = await Promise.all([fetchJournal(accountId, 100), fetchAccount(accountId)]);
+      setExecTrades(Array.isArray(j?.trades) ? j.trades : []);
+      setExecAccount(a?.account ?? null);
+    } catch (e) {
+      console.error("Gagal memuat Trade Ledger:", e);
+    } finally {
+      setExecLoading(false);
+    }
+  }, [accountId]);
+
+  useEffect(() => {
+    loadEngine();
+    const t = setInterval(loadEngine, 20000);
+    return () => clearInterval(t);
+  }, [loadEngine]);
+
+  const handleCloseExec = async (tradeId: string) => {
+    if (!window.confirm("Tutup posisi ini pada harga pasar saat ini?")) return;
+    setClosingId(tradeId);
+    try {
+      await closeTrade(accountId, tradeId);
+      await loadEngine();
+    } catch (e) {
+      alert("Gagal menutup posisi: " + (e instanceof Error ? e.message : "unknown"));
+    } finally {
+      setClosingId(null);
+    }
+  };
+
   const [trades, setTrades] = useState<Trade[]>([
     { id: 1, pair: "BTC/USDT", type: "LONG", pnl: "+12.4%", date: "2026-08-10", notes: "Breakout resistance 62000" }
   ]);
@@ -136,8 +183,116 @@ export default function JournalPage() {
         </button>
       </div>
 
+      {/* ORACLE TRADE ENGINE — EXECUTED TRADES (Tugas 2) */}
+      <div className="border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl overflow-hidden mt-6 shadow-sm dark:shadow-none">
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/40">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+              <Zap className="w-4 h-4 text-emerald-500" /> Trade Ledger — ORACLE Engine
+            </h2>
+            {execAccount && (
+              <p className="mt-1 text-xs font-mono text-slate-500 dark:text-zinc-400">
+                Saldo virtual ${money(execAccount.balance_usdt)} · PnL realisasi $
+                {money(execAccount.realized_pnl_usdt)} · margin dipakai $
+                {money(execAccount.allocated_margin_usdt)} · posisi terbuka{" "}
+                {execAccount.open_positions}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={loadEngine}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs sm:text-sm min-w-[720px]">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 dark:bg-zinc-900/50 dark:border-zinc-800 dark:text-zinc-400">
+              <tr>
+                <th className="p-3 font-medium">Time</th>
+                <th className="p-3 font-medium">Asset</th>
+                <th className="p-3 font-medium">Side</th>
+                <th className="p-3 font-medium">Mode</th>
+                <th className="p-3 font-medium">Entry</th>
+                <th className="p-3 font-medium">SL / TP</th>
+                <th className="p-3 font-medium">Size</th>
+                <th className="p-3 font-medium">Margin</th>
+                <th className="p-3 font-medium">Status</th>
+                <th className="p-3 font-medium">PnL</th>
+                <th className="p-3 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/50">
+              {execLoading ? (
+                <tr>
+                  <td colSpan={11} className="p-8 text-center text-slate-400 dark:text-zinc-500">
+                    <Loader2 className="w-5 h-5 animate-spin inline" />
+                  </td>
+                </tr>
+              ) : execTrades.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="p-8 text-center text-slate-400 dark:text-zinc-500">
+                    Belum ada trade dieksekusi. Buka proposal dari AI Chat atau Scanner.
+                  </td>
+                </tr>
+              ) : (
+                execTrades.map((t) => (
+                  <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-zinc-900/30">
+                    <td className="p-3 text-slate-500 dark:text-zinc-400 font-mono whitespace-nowrap">
+                      {new Date(t.created_at).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })}
+                    </td>
+                    <td className="p-3 font-bold text-slate-900 dark:text-white">{t.symbol}</td>
+                    <td className="p-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${t.side === "BUY" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500" : "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-500"}`}>
+                        {t.side}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-zinc-400">
+                        {t.mode === "PAPER_TRADING" ? <Beaker className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
+                        {t.mode === "PAPER_TRADING" ? "PAPER" : "LIVE"}
+                      </span>
+                    </td>
+                    <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">{money(t.filled_price ?? t.entry_price, 4)}</td>
+                    <td className="p-3 font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">
+                      <span className="text-red-500">{money(t.stop_loss_price, 4)}</span>
+                      {" / "}
+                      <span className="text-emerald-500">{(t.take_profit_targets || []).map((x) => money(x, 4)).join(", ")}</span>
+                    </td>
+                    <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">{t.position_size_coin}</td>
+                    <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">${money(t.allocated_margin_usdt)}</td>
+                    <td className="p-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${t.status === "OPEN" ? "bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400" : t.status === "CLOSED" ? "bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400" : "bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"}`}>
+                        {t.status}
+                      </span>
+                    </td>
+                    <td className={`p-3 font-mono font-medium ${typeof t.realized_pnl_usdt === "number" ? (t.realized_pnl_usdt >= 0 ? "text-emerald-600 dark:text-emerald-500" : "text-red-600 dark:text-red-500") : "text-slate-400"}`}>
+                      {typeof t.realized_pnl_usdt === "number" ? `${t.realized_pnl_usdt >= 0 ? "+" : ""}$${money(t.realized_pnl_usdt)}` : "—"}
+                    </td>
+                    <td className="p-3">
+                      {t.status === "OPEN" && t.mode === "PAPER_TRADING" && (
+                        <button
+                          onClick={() => handleCloseExec(t.id)}
+                          disabled={closingId === t.id}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+                        >
+                          {closingId === t.id ? "…" : "Close"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* TABLE SECTION */}
       <div className="border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl overflow-hidden mt-6 shadow-sm dark:shadow-none transition-colors duration-500">
+        <div className="px-4 pt-4 text-sm font-semibold text-slate-900 dark:text-white">Manual Journal</div>
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 dark:bg-zinc-900/50 dark:border-zinc-800 dark:text-zinc-400 transition-colors">
             <tr>

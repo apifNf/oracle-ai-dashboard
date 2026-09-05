@@ -36,6 +36,22 @@ class Settings(BaseSettings):
     rss_poll_seconds: int = 300
     onchain_poll_seconds: int = 20
 
+    # --- Trade Execution Engine (Tugas 2) ------------------------------ #
+    # Saldo awal akun PAPER_TRADING (virtual).
+    paper_start_balance_usdt: float = 10_000.0
+    # Guardrail wajib — ditegakkan server, apa pun yang dikirim klien/AI.
+    trade_max_risk_pct: float = 2.0          # risiko maksimum per trade (% equity)
+    trade_leverage_cap: int = 3              # leverage maksimum
+    trade_max_notional_usdt: float = 20_000.0  # nilai posisi maksimum (sanity ceiling)
+    # LIVE_BINANCE mati secara default. Set TRADE_LIVE_ENABLED=true untuk
+    # mengizinkan order sungguhan; tetap butuh confirm=true per request.
+    trade_live_enabled: bool = False
+    # Saat LIVE aktif, default ke testnet Binance Futures (aman untuk uji coba).
+    binance_testnet: bool = True
+    # Lokasi file penyimpanan akun & jurnal trade (persist antar-restart).
+    # Produksi: ganti backend ke Supabase/Postgres lewat TradeStore interface.
+    trade_store_path: str = "data/trade_store.json"
+
     @field_validator("backend_cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
