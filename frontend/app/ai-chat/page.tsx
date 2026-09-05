@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Brain, Send, User, Radar, Paperclip, Activity, X, ImageIcon, Lock, Zap } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { cn } from "@/lib/utils";
+import { formatFable5Decision } from "@/lib/fable5";
 
 type Message = { 
   role: "user" | "oracle" | "system"; 
@@ -82,8 +83,8 @@ export default function AiChatPage() {
     setLoading(true);
 
     try {
-      let res;
-      let data;
+      let res: Response;
+      let data: any;
 
       if (currentImage) {
         const formData = new FormData();
@@ -100,21 +101,30 @@ export default function AiChatPage() {
           content: data.message || data.reply || "Visual analysis complete."
         }]);
       } else {
-        res = await fetch(`${API_BASE_URL}/api/v1/chat`, {
+        // AI Router lokal: TIER 1 (GPT-4o) -> data.reply,
+        // TIER 2 (FABLE 5 / Claude) -> data.decision (JSON keputusan kuant).
+        res = await fetch(`${API_BASE_URL}/api/v1/ai/route`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: currentPrompt }),
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         data = await res.json();
-        
-        setMessages((prev) => [...prev, { 
-          role: "oracle", 
-          content: data.reply || data.response || "Analysis complete.",
-          symbols: data.detected_symbols,
-          contextInjected: data.context_injected
+
+        const content =
+          (typeof data.reply === "string" && data.reply.trim()) ||
+          (data.decision ? formatFable5Decision(data.decision) : "") ||
+          "Analysis complete.";
+
+        setMessages((prev) => [...prev, {
+          role: "oracle",
+          content,
+          symbols: data.detected_symbol ? [data.detected_symbol] : undefined,
+          contextInjected: Boolean(data.metrics_used) || Boolean(data.decision),
         }]);
       }
     } catch (err) {
+      console.error("AI Router error:", err);
       setMessages((prev) => [...prev, { role: "system", content: "Connection error to ORACLE Core." }]);
     } finally {
       setLoading(false);
