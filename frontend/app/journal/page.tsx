@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2, Wallet } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
-import { fetchJournal, fetchAccount, closeTrade, fetchLivePrice, fetchLivePrices, type TradeRecord } from "@/lib/trade";
+import { fetchJournal, fetchAccount, fetchLivePrices, type TradeRecord } from "@/lib/trade";
+import { CloseTradeModal } from "@/components/journal/close-trade-modal";
+import { GlassModal } from "@/components/ui/glass-modal";
+import { useToasts, ToastViewport } from "@/components/ui/toast";
 
 const PRICE_POLL_MS = 3000;
 const LEDGER_POLL_MS = 12000;
@@ -34,24 +37,31 @@ export default function JournalPage() {
   const accountId = user?.email || "default";
 
   const [mounted, setMounted] = useState(false);
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
 
   // --- Executed trades dari ORACLE Trade Engine (Tugas 2) --- #
   const [execTrades, setExecTrades] = useState<TradeRecord[]>([]);
   const [execAccount, setExecAccount] = useState<any>(null);
-  const [execLoading, setExecLoading] = useState(true);
-  const [closingId, setClosingId] = useState<string | null>(null);
+  const [execLoading, setExecLoading] = useState(true);   // hanya untuk load pertama
+  const [refreshing, setRefreshing] = useState(false);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [priceTick, setPriceTick] = useState(0);
+  const [closeTarget, setCloseTarget] = useState<TradeRecord | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const loadEngine = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [j, a] = await Promise.all([fetchJournal(accountId, 100), fetchAccount(accountId)]);
-      setExecTrades(Array.isArray(j?.trades) ? j.trades : []);
-      setExecAccount(a?.account ?? null);
+      // Anti-glitch: hanya perbarui state kalau data valid — jangan reset ke
+      // kosong / null saat fetch gagal / parsial (bikin angka kedip ke 0).
+      if (Array.isArray(j?.trades)) setExecTrades(j.trades);
+      if (a?.account) setExecAccount(a.account);
     } catch (e) {
       console.error("Gagal memuat Trade Ledger:", e);
     } finally {
       setExecLoading(false);
+      setRefreshing(false);
     }
   }, [accountId]);
 
@@ -105,26 +115,23 @@ export default function JournalPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [execTrades, execAccount, livePrices, priceTick]);
 
-  const handleCloseExec = async (tradeId: string, symbol: string) => {
-    if (!window.confirm("Tutup posisi ini pada harga pasar saat ini?")) return;
-    setClosingId(tradeId);
-    try {
-      // Kirim harga live jika tersedia; backend juga auto-fetch bila kosong.
-      const live = await fetchLivePrice(symbol);
-      const res = await closeTrade(accountId, tradeId, live ?? undefined);
-      await loadEngine();
-      const pnl = res?.realized_pnl_usdt;
-      if (typeof pnl === "number") {
-        alert(
-          `Posisi ditutup @ $${money(res.exit_price ?? live ?? 0, 4)} (${res.price_source}). ` +
-            `PnL ${pnl >= 0 ? "+" : ""}$${money(pnl)}.`,
-        );
-      }
-    } catch (e) {
-      alert("Gagal menutup posisi: " + (e instanceof Error ? e.message : "unknown"));
-    } finally {
-      setClosingId(null);
+  // Hasil dari CloseTradeModal — toast in-app, bukan alert browser.
+  const handleCloseDone = (res: any | null, error: string | null) => {
+    setCloseTarget(null);
+    if (error) {
+      pushToast("error", "Gagal menutup posisi", error);
+      return;
     }
+    const pnl = res?.realized_pnl_usdt;
+    const sym = res?.trade?.symbol ?? "";
+    pushToast(
+      "success",
+      `${sym} ditutup`,
+      typeof pnl === "number"
+        ? `Exit $${money(res.exit_price ?? 0, 4)} · PnL ${pnl >= 0 ? "+" : "-"}$${money(Math.abs(pnl))}`
+        : undefined,
+    );
+    loadEngine();
   };
 
   const [trades, setTrades] = useState<Trade[]>([
@@ -195,14 +202,19 @@ export default function JournalPage() {
     setIsFormModalOpen(true);  // Buka form modal
   };
 
-  // Hapus Jurnal
+  // Hapus Jurnal — via modal glass, bukan window.confirm.
   const handleDelete = () => {
     if (!selectedTrade) return;
-    if (window.confirm(`Are you sure you want to delete the journal entry for ${selectedTrade.pair}?`)) {
-      const filteredTrades = trades.filter((t) => t.id !== selectedTrade.id);
-      setTrades(filteredTrades);
-      setIsViewModalOpen(false);
+    setDeleteConfirm(true);
+  };
+
+  const confirmDelete = () => {
+    if (selectedTrade) {
+      setTrades((prev) => prev.filter((t) => t.id !== selectedTrade.id));
+      pushToast("success", "Entri jurnal dihapus", selectedTrade.pair);
     }
+    setDeleteConfirm(false);
+    setIsViewModalOpen(false);
   };
 
   // Simpan data (Bisa untuk BARU maupun EDIT)
@@ -325,9 +337,11 @@ export default function JournalPage() {
           <div className="mt-3 flex justify-end">
             <button
               onClick={loadEngine}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+              disabled={refreshing}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-60"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh manual
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Menyegarkan…" : "Refresh manual"}
             </button>
           </div>
         </div>
@@ -451,11 +465,10 @@ export default function JournalPage() {
                     <td className="p-3">
                       {isOpen && t.mode === "PAPER_TRADING" && (
                         <button
-                          onClick={() => handleCloseExec(t.id, t.symbol)}
-                          disabled={closingId === t.id}
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+                          onClick={() => setCloseTarget(t)}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-rose-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors"
                         >
-                          {closingId === t.id ? "…" : "Close"}
+                          Close
                         </button>
                       )}
                     </td>
@@ -669,6 +682,46 @@ export default function JournalPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL: KONFIRMASI TUTUP POSISI (glassmorphism) */}
+      <CloseTradeModal
+        trade={closeTarget}
+        accountId={accountId}
+        onCancel={() => setCloseTarget(null)}
+        onDone={handleCloseDone}
+      />
+
+      {/* MODAL: KONFIRMASI HAPUS ENTRI JURNAL MANUAL */}
+      <GlassModal
+        open={deleteConfirm}
+        onClose={() => setDeleteConfirm(false)}
+        title="Hapus Entri Jurnal"
+        icon={<Trash2 className="w-4 h-4 text-rose-400" />}
+        footer={
+          <>
+            <button
+              onClick={() => setDeleteConfirm(false)}
+              className="flex-1 rounded-xl border border-white/10 py-2.5 px-4 text-sm font-medium text-zinc-400 hover:text-white hover:border-white/20 transition"
+            >
+              Batal
+            </button>
+            <button
+              onClick={confirmDelete}
+              className="flex-1 rounded-xl bg-rose-600/90 hover:bg-rose-500 py-2.5 px-4 font-semibold text-white shadow-lg transition"
+            >
+              Hapus
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-zinc-400">
+          Hapus catatan jurnal untuk{" "}
+          <span className="font-mono font-semibold text-white">{selectedTrade?.pair}</span>?
+          Tindakan ini tidak bisa dibatalkan.
+        </p>
+      </GlassModal>
+
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
