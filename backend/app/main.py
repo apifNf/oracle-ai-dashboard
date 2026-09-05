@@ -48,6 +48,19 @@ async def lifespan(app: FastAPI):
         settings.trade_store_path, settings.paper_start_balance_usdt
     )
 
+    # 1c. Monetisasi: user tier store + billing (Coinbase Commerce).
+    from app.services.user_store import UserStore
+    from app.services.billing_store import BillingStore
+    from app.services.billing_service import BillingService
+
+    app.state.user_store = UserStore(
+        settings.user_store_path, settings.free_prompt_daily_limit
+    )
+    app.state.billing_store = BillingStore(settings.billing_store_path)
+    app.state.billing_service = BillingService(
+        app.state.user_store, app.state.billing_store
+    )
+
     # 2. Scanner hub — 30 aset, RSI14/EMA20/EMA50 dari OHLCV (Misi 2).
     async def _start_scanner():
         from app.api.routes.scanner import ScannerHub
@@ -101,6 +114,7 @@ async def lifespan(app: FastAPI):
             store=app.state.market_intel_store,
             indicator_engine=engine,
             scanner_hub=hub,
+            user_store=app.state.user_store,
         )
 
     app.state.ai_router = await _safe_start("ai_router", _start_ai_router)
@@ -131,6 +145,12 @@ async def lifespan(app: FastAPI):
                 await trade_engine.aclose()
             except Exception:
                 logger.exception("Shutdown trade_engine gagal.")
+        billing_service = getattr(app.state, "billing_service", None)
+        if billing_service is not None and hasattr(billing_service, "aclose"):
+            try:
+                await billing_service.aclose()
+            except Exception:
+                logger.exception("Shutdown billing_service gagal.")
         ai_router = getattr(app.state, "ai_router", None)
         if ai_router is not None and hasattr(ai_router, "aclose"):
             try:
@@ -164,5 +184,6 @@ async def health() -> dict[str, object]:
             "onchain_worker": getattr(app.state, "onchain_worker", None) is not None,
             "ai_router": getattr(app.state, "ai_router", None) is not None,
             "trade_engine": getattr(app.state, "trade_engine", None) is not None,
+            "billing_service": getattr(app.state, "billing_service", None) is not None,
         },
     }

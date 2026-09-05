@@ -52,6 +52,21 @@ class Settings(BaseSettings):
     # Produksi: ganti backend ke Supabase/Postgres lewat TradeStore interface.
     trade_store_path: str = "data/trade_store.json"
 
+    # --- Monetisasi: Coinbase Commerce billing (Fase Monetisasi) ------ #
+    coinbase_commerce_api_key: str | None = None
+    coinbase_commerce_webhook_secret: str | None = None
+    pro_price_usd: str = "49.00"
+    pro_period_days: int = 30
+    # Batas prompt/hari untuk tier FREE (Pro = unlimited).
+    free_prompt_daily_limit: int = 3
+    # Model FABLE 5 khusus Pro (prioritas quant reasoning).
+    fable5_model_pro: str = "claude-opus-5"
+    # URL yang dibuka setelah checkout Coinbase selesai / dibatalkan.
+    billing_redirect_url: str = "http://localhost:3001/ai-chat?upgraded=1"
+    billing_cancel_url: str = "http://localhost:3001/ai-chat?upgrade=cancelled"
+    user_store_path: str = "data/user_store.json"
+    billing_store_path: str = "data/billing_store.json"
+
     @field_validator("backend_cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:

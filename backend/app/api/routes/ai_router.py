@@ -30,6 +30,8 @@ class AIRouteRequest(BaseModel):
     symbol: str | None = None
     risk_params: dict[str, Any] = Field(default_factory=dict)
     history: list[dict[str, str]] = Field(default_factory=list)
+    user_id: str | None = None
+    email: str | None = None
 
 
 def _router(request: Request) -> AIModelRouter:
@@ -37,7 +39,10 @@ def _router(request: Request) -> AIModelRouter:
     if existing is not None:
         return existing
     # Fallback: buat instance sekali kalau lifespan belum menaruhnya.
-    created = AIModelRouter(store=getattr(request.app.state, "market_intel_store", None))
+    created = AIModelRouter(
+        store=getattr(request.app.state, "market_intel_store", None),
+        user_store=getattr(request.app.state, "user_store", None),
+    )
     request.app.state.ai_router = created
     return created
 
@@ -50,6 +55,7 @@ def _to_router_request(body: AIRouteRequest) -> RouterRequest:
         symbol=body.symbol,
         risk_params=body.risk_params,
         history=body.history,
+        user_id=body.user_id or body.email,
     )
 
 

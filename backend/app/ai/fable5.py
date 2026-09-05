@@ -216,6 +216,7 @@ class Fable5Engine:
         prompt: str,
         *,
         mode: str = "execution",
+        model: str | None = None,
         symbol: str | None = None,
         metrics_line: str | None = None,
         macro_context: str | None = None,
@@ -232,10 +233,11 @@ class Fable5Engine:
         multi-dimensi / perbandingan aset untuk AI Chat. Tanpa JSON.
         """
         client = self._get_client()
+        use_model = model or self._model
 
         if mode == "analysis":
             return await self._analyze_prose(
-                client, prompt, metrics_line, macro_context, whale_context
+                client, prompt, metrics_line, macro_context, whale_context, use_model
             )
 
         user_block = self._build_user_block(
@@ -251,7 +253,7 @@ class Fable5Engine:
         system = FABLE5_SYSTEM_INSTRUCTION + "\n" + _JSON_ENFORCEMENT_RIDER
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_block}]
 
-        raw = await self._call(client, system, messages)
+        raw = await self._call(client, system, messages, use_model)
         parsed = self._parse(raw)
         if parsed is not None:
             return parsed.model_dump()
@@ -268,7 +270,7 @@ class Fable5Engine:
                 ),
             }
         )
-        raw2 = await self._call(client, system, messages)
+        raw2 = await self._call(client, system, messages, use_model)
         parsed2 = self._parse(raw2)
         if parsed2 is not None:
             return parsed2.model_dump()
@@ -287,6 +289,7 @@ class Fable5Engine:
         metrics_ctx: str | None,
         macro_context: str | None,
         whale_context: str | None,
+        model: str | None = None,
     ) -> str:
         """Mode analisis: Markdown teknikal multi-dimensi, tanpa enforcement JSON."""
         user = "\n".join(
@@ -311,7 +314,7 @@ class Fable5Engine:
             # Tugas ini terikat format & ringkas — thinking dimatikan supaya
             # output tetap padat dan murah (Tugas 1).
             response = await client.messages.create(
-                model=self._model,
+                model=model or self._model,
                 max_tokens=600,
                 system=FABLE5_ANALYSIS_INSTRUCTION,
                 messages=[{"role": "user", "content": user}],
@@ -329,10 +332,12 @@ class Fable5Engine:
 
     # ---------------------- internal ------------------------------- #
 
-    async def _call(self, client: Any, system: str, messages: list[dict[str, Any]]) -> str:
+    async def _call(
+        self, client: Any, system: str, messages: list[dict[str, Any]], model: str | None = None
+    ) -> str:
         try:
             response = await client.messages.create(
-                model=self._model,
+                model=model or self._model,
                 max_tokens=4096,
                 system=system,
                 messages=messages,

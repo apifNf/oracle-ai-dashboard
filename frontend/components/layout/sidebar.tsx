@@ -29,11 +29,27 @@ export function Sidebar() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  // Tier dinamis dari backend ORACLE billing (Coinbase Commerce provisioning).
+  const syncTierFromBackend = async (email: string | null | undefined) => {
+    try {
+      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+      const res = await fetch(
+        `${base}/api/v1/billing/status?user_id=${encodeURIComponent(email || "default")}`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.tier) setTier(data.tier === "pro" ? "pro" : "free");
+      }
+    } catch {
+      /* biarkan fallback Supabase */
+    }
+  };
+
   useEffect(() => {
     const initAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
-      
+
       if (session?.user) {
         const { data } = await supabase
           .from('user_quotas')
@@ -42,17 +58,25 @@ export function Sidebar() {
           .single();
         setTier(data?.tier ?? 'free');
       }
+      await syncTierFromBackend(session?.user?.email);
       setIsLoading(false);
     };
 
     initAuth();
+    const poll = setInterval(() => {
+      supabase.auth.getSession().then(({ data: { session } }) => syncTierFromBackend(session?.user?.email));
+    }, 15000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (!session?.user) setTier(null);
+      else syncTierFromBackend(session.user.email);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearInterval(poll);
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   const handleNavigation = (e: React.MouseEvent<HTMLAnchorElement>, isProtected: boolean) => {
@@ -112,12 +136,16 @@ export function Sidebar() {
                 <span className="text-xs font-medium text-slate-700 dark:text-zinc-200 truncate w-[100px]">
                   {user.email}
                 </span>
-                <span className={cn(
-                  "text-[10px] font-bold tracking-widest uppercase mt-0.5",
-                  tier === 'pro' ? "text-amber-500 dark:text-amber-400" : "text-slate-500 dark:text-zinc-500"
-                )}>
-                  {tier === 'pro' ? 'PRO ALPHA' : 'FREE TIER'}
-                </span>
+                {tier === 'pro' ? (
+                  <span className="mt-0.5 inline-flex items-center gap-1 self-start rounded px-1.5 py-0.5 text-[10px] font-bold tracking-widest uppercase text-amber-300 bg-gradient-to-r from-emerald-500/15 to-amber-500/15 border border-amber-400/40 shadow-[0_0_12px_rgba(245,158,11,0.35)]">
+                    <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                    PRO TIER
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold tracking-widest uppercase mt-0.5 text-slate-500 dark:text-zinc-500">
+                    FREE TIER
+                  </span>
+                )}
               </div>
             </div>
             <button 

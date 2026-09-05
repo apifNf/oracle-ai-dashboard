@@ -30,6 +30,7 @@ from typing import Any
 
 from app.ai.fable5 import SYNC_SENTINEL, Fable5Engine, Fable5Unavailable
 from app.ai.tier1 import Tier1Conversational, Tier1Unavailable
+from app.core.config import settings
 from app.indicators.engine import IndicatorEngine
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ class RouterRequest:
     symbol: str | None = None
     risk_params: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
+    user_id: str | None = None
 
 
 @dataclass
@@ -110,6 +112,9 @@ class RouterResult:
     metrics_used: str | None = None
     degraded: bool = False
     error: str | None = None
+    user_tier: str = "free"
+    quota: dict[str, Any] | None = None       # {limit, used, remaining}
+    limit_reached: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -120,7 +125,11 @@ class RouterResult:
             "detected_symbols": self.detected_symbols,
             "detected_symbol": self.detected_symbols[0] if self.detected_symbols else None,
             "degraded": self.degraded,
+            "user_tier": self.user_tier,
+            "limit_reached": self.limit_reached,
         }
+        if self.quota is not None:
+            payload["quota"] = self.quota
         if self.reply is not None:
             payload["reply"] = self.reply
         if self.decision is not None:
@@ -139,6 +148,7 @@ class AIModelRouter:
         store: Any | None = None,
         indicator_engine: IndicatorEngine | None = None,
         scanner_hub: Any | None = None,
+        user_store: Any | None = None,
         tier1: Tier1Conversational | None = None,
         fable5: Fable5Engine | None = None,
     ) -> None:
@@ -146,6 +156,7 @@ class AIModelRouter:
         self._engine = indicator_engine or IndicatorEngine()
         self._owns_engine = indicator_engine is None
         self._scanner_hub = scanner_hub
+        self._user_store = user_store
         self._tier1 = tier1 or Tier1Conversational()
         self._fable5 = fable5 or Fable5Engine()
 
@@ -188,6 +199,30 @@ class AIModelRouter:
         tier, mode, reason = self.decide_route(req)
         symbols = self.detect_symbols(req)
 
+        # --- Feature gating (Fase Monetisasi) --- #
+        user_tier = "free"
+        quota: dict[str, Any] | None = None
+        if self._user_store is not None and req.user_id:
+            gate = self._user_store.check_and_consume_prompt(req.user_id)
+            user_tier = gate["tier"]
+            quota = {
+                "limit": gate["limit"],
+                "used": gate["prompts_used_today"],
+                "remaining": gate["prompts_remaining"],
+            }
+            if not gate["allowed"]:
+                return RouterResult(
+                    tier=0, mode="limit_reached", model="none",
+                    routed_because="free_daily_prompt_limit_reached",
+                    detected_symbols=symbols, user_tier="free", quota=quota,
+                    limit_reached=True,
+                    reply=(
+                        f"Batas {gate['limit']} prompt/hari untuk FREE TIER sudah tercapai. "
+                        "Upgrade ke ORACLE PRO ($49/bln, bayar USDC/USDT) untuk prompt tak "
+                        "terbatas + prioritas model FABLE 5."
+                    ),
+                )
+
         snaps_raw = await asyncio.gather(
             *(self._market_snapshot(sym) for sym in symbols[:4])
         )
@@ -198,10 +233,14 @@ class AIModelRouter:
         macro_ctx, whale_ctx = self._market_intel_context()
 
         if tier == 1:
-            return await self._run_tier1(req, reason, symbols, metrics_ctx)
-        return await self._run_tier2(
-            req, mode, reason, symbols, metrics_ctx, macro_ctx, whale_ctx
-        )
+            result = await self._run_tier1(req, reason, symbols, metrics_ctx)
+        else:
+            result = await self._run_tier2(
+                req, mode, reason, symbols, metrics_ctx, macro_ctx, whale_ctx, user_tier
+            )
+        result.user_tier = user_tier
+        result.quota = quota
+        return result
 
     async def _run_tier1(
         self,
@@ -238,9 +277,12 @@ class AIModelRouter:
         metrics_ctx: str,
         macro_ctx: str,
         whale_ctx: str,
+        user_tier: str = "free",
     ) -> RouterResult:
+        # PRO: prioritas model quant (Opus). FREE: model default (Sonnet).
+        model_override = settings.fable5_model_pro if user_tier == "pro" else None
         result = RouterResult(
-            tier=2, mode=mode, model=self._fable5._model,
+            tier=2, mode=mode, model=model_override or self._fable5._model,
             routed_because=reason, detected_symbols=symbols, metrics_used=metrics_ctx,
         )
 
@@ -254,6 +296,7 @@ class AIModelRouter:
             out = await self._fable5.analyze(
                 req.prompt,
                 mode=mode,
+                model=model_override,
                 symbol=symbols[0] if symbols else None,
                 metrics_line=metrics_ctx,
                 macro_context=macro_ctx,

@@ -1,12 +1,15 @@
 ﻿"use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Brain, Send, User, Radar, Paperclip, Activity, X, ImageIcon, Lock, Zap } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Brain, Send, User, Radar, Paperclip, Activity, X, ImageIcon, Lock, Zap, Crown } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { cn } from "@/lib/utils";
 import { formatFable5Decision } from "@/lib/fable5";
 import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
 import { proposalParamsFromDecision, extractProposalFromText, type ProposalParams } from "@/lib/trade";
+import { useAccountId, fetchBillingStatus, type BillingStatus } from "@/lib/billing";
+import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
+import { useToasts, ToastViewport } from "@/components/ui/toast";
 
 type Message = {
   role: "user" | "oracle" | "system";
@@ -19,8 +22,9 @@ type Message = {
 };
 
 export default function AiChatPage() {
-  const { tier, user } = useAuth();
-  const accountId = user?.email || "default";
+  const { accountId, email } = useAccountId();
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
+
   const [messages, setMessages] = useState<Message[]>([
     { role: "oracle", content: "ORACLE System Online. What asset or market structure would you like to analyze today?" }
   ]);
@@ -28,16 +32,39 @@ export default function AiChatPage() {
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const FREE_PROMPT_LIMIT = 3;
-  const userMessageCount = messages.filter(m => m.role === "user").length;
-  const isLocked = tier !== 'pro' && userMessageCount >= FREE_PROMPT_LIMIT;
-  const remainingPrompts = Math.max(0, FREE_PROMPT_LIMIT - userMessageCount);
+  const tier: "free" | "pro" = billing?.tier ?? "free";
+  const remainingPrompts = billing?.prompts_remaining ?? null; // null = unlimited (pro)
+  const isLocked = tier === "free" && remainingPrompts !== null && remainingPrompts <= 0;
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+
+  const refreshBilling = useCallback(async () => {
+    if (!accountId) return;
+    const s = await fetchBillingStatus(accountId);
+    if (s) setBilling(s);
+  }, [accountId]);
+
+  useEffect(() => {
+    refreshBilling();
+  }, [refreshBilling]);
+
+  // Kembali dari checkout (?upgraded=1) -> refresh & sambut.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("upgraded") === "1") {
+      refreshBilling().then(() => pushToast("success", "Selamat! Akun kamu sekarang PRO", "Prompt tak terbatas + FABLE 5 prioritas."));
+      window.history.replaceState({}, "", "/ai-chat");
+    } else if (p.get("upgrade") === "cancelled") {
+      pushToast("info", "Upgrade dibatalkan");
+      window.history.replaceState({}, "", "/ai-chat");
+    }
+  }, [refreshBilling, pushToast]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -111,10 +138,24 @@ export default function AiChatPage() {
         res = await fetch(`${API_BASE_URL}/api/v1/ai/route`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: currentPrompt }),
+          body: JSON.stringify({ prompt: currentPrompt, user_id: accountId, email }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         data = await res.json();
+
+        // Sinkron kuota dari respons.
+        if (data.quota) {
+          setBilling((b) =>
+            b
+              ? { ...b, prompts_used_today: data.quota.used, prompts_remaining: data.quota.remaining, tier: data.user_tier ?? b.tier }
+              : b,
+          );
+        }
+        if (data.limit_reached) {
+          setMessages((prev) => [...prev, { role: "system", content: data.reply || "Batas prompt harian tercapai." }]);
+          setUpgradeOpen(true);
+          return;
+        }
 
         const rawContent =
           (typeof data.reply === "string" && data.reply.trim()) ||
@@ -242,10 +283,34 @@ export default function AiChatPage() {
       </div>
 
       <div className="absolute bottom-6 left-4 right-4 md:left-8 md:right-8 flex flex-col gap-2">
-        {tier !== 'pro' && !isLocked && (
+        {tier === "pro" ? (
+          <div className="flex items-center justify-center gap-2 text-xs font-medium text-amber-500 mb-1">
+            <Crown className="w-3.5 h-3.5" />
+            <span>PRO — Unlimited FABLE 5 prompts</span>
+          </div>
+        ) : isLocked ? (
+          <button
+            onClick={() => setUpgradeOpen(true)}
+            className="mb-1 flex items-center justify-center gap-2 text-xs font-medium rounded-lg border border-amber-400/40 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 px-3 py-1.5 hover:border-amber-400 transition-colors"
+          >
+            <Crown className="w-3.5 h-3.5" />
+            Batas free (0/{billing?.prompt_limit ?? 3}) tercapai — Upgrade ke PRO ($49, USDC/USDT)
+          </button>
+        ) : (
           <div className="flex items-center justify-center gap-2 text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">
             <Activity className="w-3.5 h-3.5" />
-            <span>Free Alpha Prompts Remaining: <strong className="text-emerald-500">{remainingPrompts}/{FREE_PROMPT_LIMIT}</strong></span>
+            <span>
+              Free Alpha Prompts:{" "}
+              <strong className="text-emerald-500">
+                {remainingPrompts ?? "—"}/{billing?.prompt_limit ?? 3}
+              </strong>
+            </span>
+            <button
+              onClick={() => setUpgradeOpen(true)}
+              className="ml-1 text-amber-500 hover:text-amber-400 font-semibold"
+            >
+              Upgrade
+            </button>
           </div>
         )}
 
@@ -264,15 +329,18 @@ export default function AiChatPage() {
 
         <div className="relative">
           {isLocked && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60 dark:bg-[#0A0A0A]/70 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-white/10 shadow-lg">
+            <button
+              onClick={() => setUpgradeOpen(true)}
+              className="absolute inset-0 z-20 flex items-center justify-center bg-white/60 dark:bg-[#0A0A0A]/70 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-white/10 shadow-lg cursor-pointer"
+            >
               <div className="flex items-center gap-3 px-6 py-3 bg-white dark:bg-[#111113] rounded-xl border border-amber-500/30 shadow-2xl">
                 <Lock className="w-5 h-5 text-amber-500" />
-                <div className="flex flex-col">
+                <div className="flex flex-col text-left">
                   <span className="text-sm font-bold tracking-tight text-slate-900 dark:text-white uppercase">Pro Alpha Required</span>
-                  <span className="text-[10px] text-slate-500 dark:text-zinc-400">Upgrade to unlock unlimited Oracle AI Analysis</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400">Klik untuk upgrade — unlimited Oracle AI + FABLE 5</span>
                 </div>
               </div>
-            </div>
+            </button>
           )}
 
           <form onSubmit={sendMessage} className={cn(
@@ -316,6 +384,15 @@ export default function AiChatPage() {
           </form>
         </div>
       </div>
+
+      <UpgradeToProModal
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        accountId={accountId}
+        email={email}
+        onToast={pushToast}
+      />
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
