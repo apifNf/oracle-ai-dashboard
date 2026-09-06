@@ -27,8 +27,7 @@ import hmac
 import json
 import logging
 import os
-import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -89,7 +88,7 @@ def _envelope(
 
 
 # --------------------------------------------------------------------------- #
-# PRO: simulasi feed super-fresh + tag sentimen + baris ticker
+# Tag sentimen + baris terminal on-chain (timestamp RIIL — tanpa simulasi)
 # --------------------------------------------------------------------------- #
 
 
@@ -98,40 +97,51 @@ def _sentiment(impact: Any) -> str:
     return v if v in ("BULLISH", "BEARISH") else "NEUTRAL"
 
 
-def _freshen_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Kompres timestamp ke ~2 jam terakhir (urutan dipertahankan) + tag sentimen."""
-    now = datetime.now(tz=timezone.utc)
-    out: list[dict[str, Any]] = []
-    for i, r in enumerate(rows):
-        item = dict(r)
-        offset = i * 7 + random.uniform(0, 5)
-        item["published_at"] = (now - timedelta(minutes=offset)).isoformat()
-        item["sentiment"] = _sentiment(item.get("impact"))
-        item["fresh"] = offset < 12
-        out.append(item)
-    return out
+def _usd(v: Any) -> str:
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return "$?"
+    if n >= 1_000_000_000:
+        return f"${n / 1_000_000_000:.2f}B"
+    if n >= 1_000_000:
+        return f"${n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"${n / 1_000:.1f}K"
+    return f"${n:,.0f}"
 
 
-def _freshen_onchain(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    now = datetime.now(tz=timezone.utc)
-    out: list[dict[str, Any]] = []
-    for i, r in enumerate(rows):
-        item = dict(r)
-        item["received_at"] = (now - timedelta(seconds=int(i * 40 + random.uniform(0, 25)))).isoformat()
-        item["ticker_line"] = _ticker_line(item)
-        item["fresh"] = i < 3
-        out.append(item)
-    return out
+def _short(a: Any) -> str:
+    s = str(a or "")
+    if len(s) <= 14 or not s.startswith("0x"):
+        return s or "Unknown"
+    return f"{s[:8]}...{s[-4:]}"
 
 
-def _ticker_line(r: dict[str, Any]) -> str:
-    amt = r.get("amount_display") or "?"
-    asset = r.get("asset") or ""
-    to = (r.get("to_address") or "")[:10]
-    frm = (r.get("from_address") or "")[:10]
-    if str(r.get("status")).upper() == "IMPORTANT":
-        return f"🚨 WHALE ALERT: {amt} {asset} dipindahkan {frm}… → {to}…"
-    return f"{amt} {asset} · {frm}… → {to}…"
+def _decorate_onchain(r: dict[str, Any]) -> dict[str, Any]:
+    """Bangun baris terminal gaya command-line dari event asli."""
+    item = dict(r)
+    amt = item.get("amount_display") or "?"
+    asset = item.get("asset") or ""
+    usd = _usd(item.get("amount_usd"))
+    important = str(item.get("status")).upper() == "IMPORTANT"
+    prefix = "🚨 " if important else ""
+
+    if item.get("event_type") == "EXCHANGE_TRADE":
+        side = item.get("side") or "TRADE"
+        item["ticker_line"] = f"{prefix}{amt} {asset} ({usd}) {side} order filled on Binance"
+        px = item.get("price")
+        item["ticker_sub"] = (
+            f"↳ Trade #{item.get('trade_ref', '?')}"
+            + (f" @ ${float(px):,.2f}" if isinstance(px, (int, float)) else "")
+        )
+    else:
+        frm = _short(item.get("from_address")) or "Unknown"
+        to = _short(item.get("to_address")) or "Unknown"
+        item["ticker_line"] = f"{prefix}{amt} {asset} ({usd}) transferred from {frm} to {to}"
+        tx = item.get("tx_hash")
+        item["ticker_sub"] = f"↳ TX: {_short(tx)}" if tx else "↳ on-chain transfer"
+    return item
 
 
 # --------------------------------------------------------------------------- #
@@ -155,10 +165,10 @@ async def get_news(request: Request, limit: int = 30, user_id: str | None = None
             tier,
         )
 
-    if tier == "pro":
-        rows = _freshen_news(rows)
-    else:
-        rows = [{**r, "sentiment": _sentiment(r.get("impact"))} for r in rows[:FREE_PREVIEW_LIMIT]]
+    # Timestamp RIIL dari sumber (CryptoCompare/RSS). Tanpa simulasi.
+    if tier != "pro":
+        rows = rows[:FREE_PREVIEW_LIMIT]
+    rows = [{**r, "sentiment": _sentiment(r.get("impact"))} for r in rows]
     return _envelope(rows, "ok" if rows else "empty", tier=tier)
 
 
@@ -178,10 +188,9 @@ async def get_onchain(request: Request, limit: int = 20, user_id: str | None = N
             tier,
         )
 
-    if tier == "pro":
-        rows = _freshen_onchain(rows)
-    else:
-        rows = [{**r, "ticker_line": _ticker_line(r)} for r in rows[:FREE_PREVIEW_LIMIT]]
+    if tier != "pro":
+        rows = rows[:FREE_PREVIEW_LIMIT]
+    rows = [_decorate_onchain(r) for r in rows]
     return _envelope(rows, "ok" if rows else "empty", tier=tier)
 
 
@@ -192,8 +201,9 @@ async def market_intel_health(request: Request) -> dict[str, Any]:
         "status": "ok",
         "store": store.health(),
         "workers": {
-            "rss": getattr(request.app.state, "rss_worker", None) is not None,
+            "news": getattr(request.app.state, "news_worker", None) is not None,
             "onchain": getattr(request.app.state, "onchain_worker", None) is not None,
+            "whale_trades": getattr(request.app.state, "whale_trade_worker", None) is not None,
         },
     }
 

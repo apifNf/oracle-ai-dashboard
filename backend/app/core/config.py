@@ -27,14 +27,20 @@ class Settings(BaseSettings):
     tier1_model: str = "gpt-4o"
     fable5_model: str = "claude-sonnet-5"
 
-    # --- Market Intelligence (Misi 1) --------------------------------- #
-    # Ambang transaksi whale on-chain dalam USD.
+    # --- Market Intelligence (Misi 1 + Terminal Institusional) ------ #
+    # Ambang WHALE ALERT (🚨) untuk transaksi on-chain / eksekusi CEX (USD).
     whale_threshold_usd: float = 500_000.0
+    # Ambang minimum yang masuk ke aliran terminal on-chain (flow besar).
+    whale_stream_min_usd: float = 250_000.0
     # Endpoint JSON-RPC Ethereum publik (tanpa API key). Boleh dioverride.
     eth_rpc_url: str = "https://ethereum-rpc.publicnode.com"
     # Interval polling worker (detik).
-    rss_poll_seconds: int = 300
+    rss_poll_seconds: int = 180
     onchain_poll_seconds: int = 20
+    # CryptoCompare / CoinDesk Data — Alpha News real-time. Kalau kosong,
+    # NewsWorker fallback ke RSS publik (CoinDesk/Cointelegraph/Decrypt/…).
+    cryptocompare_api_key: str | None = None
+    news_poll_seconds: int = 120
 
     # --- Trade Execution Engine (Tugas 2) ------------------------------ #
     # Saldo awal akun PAPER_TRADING (virtual).

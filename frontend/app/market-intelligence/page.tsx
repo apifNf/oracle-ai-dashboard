@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Globe, Activity, ExternalLink, Lock, Loader2, WifiOff, Radio,
+  Globe, ExternalLink, Lock, Loader2, Radio, CalendarClock,
   TrendingUp, TrendingDown, Minus, Zap,
 } from "lucide-react";
 import { useAccountId, fetchBillingStatus } from "@/lib/billing";
 import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
+import { EconomicCalendar } from "@/components/market-intel/economic-calendar";
 import { cn } from "@/lib/utils";
 
 const API_ROOT = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
@@ -28,15 +29,17 @@ type NewsItem = {
 
 type OnChainItem = {
   id: string;
+  event_type?: string;
   asset: string | null;
   amount_display: string | null;
   amount_usd?: number | null;
+  side?: string;
   from_address: string | null;
   to_address: string | null;
   status: string;
   received_at: string;
   ticker_line?: string;
-  fresh?: boolean;
+  ticker_sub?: string;
 };
 
 type Envelope<T> = {
@@ -60,9 +63,6 @@ function relativeTime(iso: string): string {
   if (s < 86400) return `${Math.floor(s / 3600)} jam lalu`;
   return `${Math.floor(s / 86400)} hari lalu`;
 }
-
-const shortAddr = (a: string | null) =>
-  !a ? "—" : a.length <= 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 function SentimentChip({ s }: { s: Sentiment }) {
   const map = {
@@ -207,80 +207,111 @@ function AnalyticalTerminal({
   loading: boolean;
 }) {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      {/* Alpha / Macro news */}
-      <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-[#0e1015]/70 backdrop-blur-md shadow-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
-          <Zap className="w-4 h-4 text-emerald-400" />
-          <h2 className="text-sm font-semibold text-white">Alpha News Feed</h2>
-          <span className="ml-auto text-[10px] font-mono text-zinc-500">{news.length} headline</span>
-        </div>
-        <div className="max-h-[calc(100vh-15rem)] overflow-y-auto divide-y divide-white/5">
-          {loading && news.length === 0 ? (
-            <div className="p-8 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
-          ) : news.length === 0 ? (
-            <p className="p-6 text-sm text-zinc-500">Belum ada headline.</p>
-          ) : (
-            news.map((n) => (
-              <a
-                key={n.id}
-                href={n.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={cn(
-                  "flex items-start gap-3 px-4 py-3 hover:bg-white/[0.03] transition-colors border-l-2 group",
-                  n.fresh ? "border-emerald-500/70" : "border-transparent",
-                )}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <SentimentChip s={(n.sentiment as Sentiment) ?? "NEUTRAL"} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{n.source}</span>
-                    {n.fresh && (
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-1 rounded">NEW</span>
-                    )}
-                    <span className="ml-auto text-[10px] font-mono text-zinc-500 shrink-0">{relativeTime(n.published_at)}</span>
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Alpha / Macro news — dengan thumbnail */}
+        <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-[#0e1015]/70 backdrop-blur-md shadow-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
+            <Zap className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-sm font-semibold text-white">Alpha News Feed</h2>
+            <span className="ml-auto text-[10px] font-mono text-zinc-500">{news.length} headline · CryptoCompare / RSS live</span>
+          </div>
+          <div className="max-h-[560px] lg:max-h-[calc(100vh-24rem)] overflow-y-auto divide-y divide-white/5">
+            {loading && news.length === 0 ? (
+              <div className="p-8 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
+            ) : news.length === 0 ? (
+              <p className="p-6 text-sm text-zinc-500">Belum ada headline.</p>
+            ) : (
+              news.map((n) => (
+                <a
+                  key={n.id}
+                  href={n.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-3 px-4 py-3 hover:bg-white/[0.03] transition-colors group"
+                >
+                  {n.image_url ? (
+                    <img
+                      src={n.image_url}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                      }}
+                      className="w-16 h-16 rounded-lg object-cover shrink-0 border border-white/10 bg-white/5"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-lg shrink-0 border border-white/10 bg-white/[0.03] flex items-center justify-center">
+                      <Globe className="w-5 h-5 text-zinc-700" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <SentimentChip s={(n.sentiment as Sentiment) ?? "NEUTRAL"} />
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 truncate">{n.source}</span>
+                      <span className="ml-auto text-[10px] font-mono text-zinc-500 shrink-0">{relativeTime(n.published_at)}</span>
+                    </div>
+                    <p className="text-sm text-zinc-200 leading-snug group-hover:text-emerald-300 transition-colors line-clamp-2">
+                      {n.title}
+                      <ExternalLink className="inline w-3 h-3 ml-1 opacity-0 group-hover:opacity-100 text-emerald-400" />
+                    </p>
                   </div>
-                  <p className="text-sm text-zinc-200 leading-snug group-hover:text-emerald-300 transition-colors line-clamp-2">
-                    {n.title}
-                    <ExternalLink className="inline w-3 h-3 ml-1 opacity-0 group-hover:opacity-100 text-emerald-400" />
-                  </p>
-                </div>
-              </a>
-            ))
-          )}
+                </a>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* On-Chain Stream — HARDCORE TERMINAL */}
+        <div className="lg:col-span-1 rounded-2xl border border-emerald-500/15 bg-black/90 shadow-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-emerald-500/15 bg-black">
+            <Radio className="w-3.5 h-3.5 text-emerald-400" />
+            <h2 className="text-xs font-mono font-semibold text-emerald-400 tracking-wide">oracle@onchain — stream</h2>
+            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_#10b981]" />
+          </div>
+          <div className="max-h-[560px] lg:max-h-[calc(100vh-24rem)] overflow-y-auto p-2 font-mono text-[11px] leading-relaxed bg-black/90">
+            {chain.length === 0 ? (
+              <p className="p-3 text-emerald-700 animate-pulse">
+                &gt; awaiting whale flow (&gt; $250k)<span className="animate-ping">_</span>
+              </p>
+            ) : (
+              chain.map((c) => {
+                const alert = String(c.status).toUpperCase() === "IMPORTANT";
+                return (
+                  <div
+                    key={c.id}
+                    className={cn(
+                      "px-2 py-1 rounded",
+                      alert
+                        ? "text-amber-300 [text-shadow:0_0_8px_rgba(245,158,11,0.35)]"
+                        : "text-emerald-400/90",
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="text-zinc-600 shrink-0">[LIVE]</span>
+                      <span className="flex-1 break-words">{c.ticker_line}</span>
+                      <span className="text-zinc-700 shrink-0">{relativeTime(c.received_at)}</span>
+                    </div>
+                    {c.ticker_sub && (
+                      <div className="pl-[3.2rem] text-zinc-600 break-all">{c.ticker_sub}</div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
-      {/* On-chain terminal ticker */}
-      <div className="lg:col-span-1 rounded-2xl border border-white/10 bg-[#08090c] shadow-xl overflow-hidden">
+      {/* Macro & Government Events — TradingView Economic Calendar */}
+      <div className="rounded-2xl border border-white/10 bg-[#0e1015]/70 backdrop-blur-md shadow-xl overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
-          <Radio className="w-4 h-4 text-amber-400" />
-          <h2 className="text-sm font-semibold text-white">On-Chain Stream</h2>
-          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+          <CalendarClock className="w-4 h-4 text-indigo-400" />
+          <h2 className="text-sm font-semibold text-white">Macro &amp; Government Events</h2>
+          <span className="ml-auto text-[10px] text-zinc-500">US CPI · The Fed · NFP · ECB · global</span>
         </div>
-        <div className="max-h-[calc(100vh-15rem)] overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
-          {chain.length === 0 ? (
-            <p className="p-4 text-zinc-600">Menunggu transfer whale &gt; $500k…</p>
-          ) : (
-            chain.map((c) => {
-              const alert = String(c.status).toUpperCase() === "IMPORTANT";
-              return (
-                <div
-                  key={c.id}
-                  className={cn(
-                    "px-2 py-1.5 rounded flex items-start gap-2",
-                    alert ? "text-amber-300 bg-amber-500/[0.06]" : "text-zinc-400",
-                  )}
-                >
-                  <span className="flex-1 break-all">
-                    {c.ticker_line ?? `${c.amount_display} ${c.asset} → ${shortAddr(c.to_address)}`}
-                  </span>
-                  <span className="text-zinc-600 shrink-0">{relativeTime(c.received_at)}</span>
-                </div>
-              );
-            })
-          )}
+        <div className="h-[460px]">
+          <EconomicCalendar />
         </div>
       </div>
     </div>
@@ -321,14 +352,25 @@ function PaywallView({
               href={n.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-4 hover:border-emerald-500/30 transition-colors"
+              className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-4 hover:border-emerald-500/30 transition-colors"
             >
-              <div className="flex items-center gap-2 mb-1">
-                <SentimentChip s={(n.sentiment as Sentiment) ?? "NEUTRAL"} />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{n.source}</span>
-                <span className="ml-auto text-[10px] text-zinc-500">{relativeTime(n.published_at)}</span>
+              {n.image_url && (
+                <img
+                  src={n.image_url}
+                  alt=""
+                  loading="lazy"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                  className="w-16 h-16 rounded-lg object-cover shrink-0 border border-white/10"
+                />
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <SentimentChip s={(n.sentiment as Sentiment) ?? "NEUTRAL"} />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 truncate">{n.source}</span>
+                  <span className="ml-auto text-[10px] text-zinc-500 shrink-0">{relativeTime(n.published_at)}</span>
+                </div>
+                <p className="text-sm text-slate-800 dark:text-zinc-200">{n.title}</p>
               </div>
-              <p className="text-sm text-slate-800 dark:text-zinc-200">{n.title}</p>
             </a>
           ))
         )}
@@ -367,8 +409,9 @@ function PaywallView({
               Upgrade ke PRO untuk Real-Time Alpha Feed &amp; Deep On-Chain Stream
             </h3>
             <p className="mt-2 text-sm text-zinc-400">
-              Feed berita makro real-time bertag sentimen otomatis + terminal ticker
-              whale-alert on-chain (&gt; $500k). FREE hanya melihat cuplikan berita lama.
+              Live CryptoCompare / RSS news dengan thumbnail &amp; tag sentimen, terminal
+              whale-alert on-chain real-time (&gt; $500k), dan Kalender Ekonomi Makro
+              (US CPI, The Fed, NFP). FREE hanya melihat cuplikan berita.
             </p>
             <button
               onClick={onUpgrade}

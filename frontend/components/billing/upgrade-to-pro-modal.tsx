@@ -12,9 +12,9 @@ import {
 const BENEFITS = [
   "Unlimited FABLE 5 Prompts (with Actionable Trader's Take)",
   "Deep Actionable Strategy & Trader's Take (bukan sekadar data)",
+  "Real-Time Market Intel (Live CryptoCompare News, Macro Economic Calendar, & Hardcore Whale Terminal)",
   "Prioritas model quant Opus (claude-opus-5)",
   "Live Signal Scanner Alerts",
-  "Deep Whale Flow (> $500k on-chain)",
   "Autotrade Engine (paper + live guardrails)",
 ];
 

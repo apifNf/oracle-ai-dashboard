@@ -71,22 +71,20 @@ async def lifespan(app: FastAPI):
 
     app.state.scanner_hub = await _safe_start("scanner_hub", _start_scanner)
 
-    # 3. RSS worker — Alpha News Feed (Misi 1).
-    async def _start_rss():
-        from app.workers.rss_worker import RssWorker
+    # 3. News worker — Alpha News Feed real-time (CryptoCompare -> RSS fallback).
+    async def _start_news():
+        from app.workers.news_worker import NewsWorker
 
-        worker = RssWorker(
+        worker = NewsWorker(
             store=app.state.market_intel_store,
-            redis_client=getattr(settings, "redis", None),
-            supabase=getattr(settings, "supabase", None),
-            poll_interval=settings.rss_poll_seconds,
+            poll_interval=settings.news_poll_seconds,
         )
         await worker.start()
         return worker
 
-    app.state.rss_worker = await _safe_start("rss_worker", _start_rss)
+    app.state.news_worker = await _safe_start("news_worker", _start_news)
 
-    # 4. On-chain worker — whale > $500k (Misi 1).
+    # 4a. On-chain worker — transfer ETH/ERC-20 on-chain sungguhan (JSON-RPC).
     async def _start_onchain():
         from app.workers.onchain_worker import OnChainWorker
 
@@ -102,6 +100,19 @@ async def lifespan(app: FastAPI):
         return worker
 
     app.state.onchain_worker = await _safe_start("onchain_worker", _start_onchain)
+
+    # 4b. Whale-trade worker — eksekusi whale real-time via WebSocket Binance.
+    async def _start_whale_trades():
+        from app.workers.whale_trade_worker import WhaleTradeWorker
+
+        worker = WhaleTradeWorker(
+            store=app.state.market_intel_store,
+            threshold_usd=settings.whale_threshold_usd,
+        )
+        await worker.start()
+        return worker
+
+    app.state.whale_trade_worker = await _safe_start("whale_trade_worker", _start_whale_trades)
 
     # 5. Dual-Model AI Router (Misi 3 & 4) — reasoning engine dibuat lazy,
     #    router sendiri murah untuk diinstansiasi.
@@ -132,7 +143,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for name in ("scanner_hub", "rss_worker", "onchain_worker"):
+        for name in ("scanner_hub", "news_worker", "onchain_worker", "whale_trade_worker"):
             component = getattr(app.state, name, None)
             if component is not None and hasattr(component, "stop"):
                 try:
@@ -180,8 +191,9 @@ async def health() -> dict[str, object]:
         "service": "oracle-backend",
         "workers": {
             "scanner_hub": getattr(app.state, "scanner_hub", None) is not None,
-            "rss_worker": getattr(app.state, "rss_worker", None) is not None,
+            "news_worker": getattr(app.state, "news_worker", None) is not None,
             "onchain_worker": getattr(app.state, "onchain_worker", None) is not None,
+            "whale_trade_worker": getattr(app.state, "whale_trade_worker", None) is not None,
             "ai_router": getattr(app.state, "ai_router", None) is not None,
             "trade_engine": getattr(app.state, "trade_engine", None) is not None,
             "billing_service": getattr(app.state, "billing_service", None) is not None,

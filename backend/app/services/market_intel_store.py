@@ -66,7 +66,10 @@ class MarketIntelStore:
 
     def recent_news(self, limit: int = 30) -> list[dict[str, Any]]:
         limit = max(1, min(limit, len(self._news) or 1))
-        return list(self._news)[:limit]
+        rows = sorted(
+            self._news, key=lambda r: str(r.get("published_at") or ""), reverse=True
+        )
+        return rows[:limit]
 
     # ---------------------- on-chain ----------------------------------- #
 
@@ -85,7 +88,10 @@ class MarketIntelStore:
 
     def recent_onchain(self, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(limit, len(self._onchain) or 1))
-        return list(self._onchain)[:limit]
+        rows = sorted(
+            self._onchain, key=lambda r: str(r.get("received_at") or ""), reverse=True
+        )
+        return rows[:limit]
 
     # ---------------------- introspeksi ------------------------------- #
 
