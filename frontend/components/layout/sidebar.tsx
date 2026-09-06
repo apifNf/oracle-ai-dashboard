@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
-import { Bot, Gauge, MessageSquareText, NotebookPen, Settings, Globe, User, LogOut, Activity } from "lucide-react";
+import { Bot, Gauge, MessageSquareText, NotebookPen, Settings, Globe, User, LogOut, Activity, CandlestickChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/ai-chat", label: "AI Chat", icon: MessageSquareText, protected: true },
   { href: "/market-intelligence", label: "Market Intelligence", icon: Globe, protected: false },
   { href: "/journal", label: "Journal", icon: NotebookPen, protected: true },
+  { href: "/technical-analyst", label: "Technical Analyst", icon: CandlestickChart, protected: true },
   { href: "/settings", label: "Settings", icon: Settings, protected: true }
 ];
 
