@@ -310,7 +310,7 @@ function AnalyticalTerminal({
           <h2 className="text-sm font-semibold text-white">Macro &amp; Government Events</h2>
           <span className="ml-auto text-[10px] text-zinc-500">US CPI · The Fed · NFP · ECB · global</span>
         </div>
-        <div className="h-[460px] bg-[#0e1015]">
+        <div className="h-[460px] bg-[#131722]">
           <EconomicCalendar />
         </div>
       </div>
