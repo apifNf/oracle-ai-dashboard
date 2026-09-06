@@ -3,9 +3,14 @@
 import { useEffect, useRef } from "react";
 
 /**
- * TradingView Economic Calendar (Events) Widget.
+ * TradingView Economic Calendar (Events) Widget — DIPAKSA DARK.
  * Dibangun sepenuhnya di client (useEffect) — tidak ada SSR/hydration issue.
  * Fokus event makro global: US CPI, The Fed / FOMC, NFP, ECB, dll.
+ *
+ * Catatan: widget "events" TradingView sering merender body putih saat
+ * isTransparent:true. Solusinya: config `colorTheme:"dark"` + `isTransparent:true`
+ * DAN latar solid gelap ORACLE (#0e1015) di container pembungkus, sehingga area
+ * transparan apa pun tetap tampil gelap dan menyatu dengan terminal.
  */
 export function EconomicCalendar() {
   const ref = useRef<HTMLDivElement>(null);
@@ -19,6 +24,7 @@ export function EconomicCalendar() {
     widget.className = "tradingview-widget-container__widget";
     widget.style.height = "100%";
     widget.style.width = "100%";
+    widget.style.backgroundColor = "#0e1015";
     host.appendChild(widget);
 
     const script = document.createElement("script");
@@ -45,8 +51,8 @@ export function EconomicCalendar() {
   return (
     <div
       ref={ref}
-      className="tradingview-widget-container h-full w-full"
-      style={{ height: "100%", width: "100%" }}
+      className="tradingview-widget-container h-full w-full bg-[#0e1015] [color-scheme:dark]"
+      style={{ height: "100%", width: "100%", backgroundColor: "#0e1015" }}
     />
   );
 }

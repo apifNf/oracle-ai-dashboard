@@ -303,14 +303,14 @@ function AnalyticalTerminal({
         </div>
       </div>
 
-      {/* Macro & Government Events — TradingView Economic Calendar */}
-      <div className="rounded-2xl border border-white/10 bg-[#0e1015]/70 backdrop-blur-md shadow-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
+      {/* Macro & Government Events — TradingView Economic Calendar (forced dark) */}
+      <div className="rounded-2xl border border-white/10 bg-[#0e1015] shadow-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10 bg-[#0e1015]/70 backdrop-blur-md">
           <CalendarClock className="w-4 h-4 text-indigo-400" />
           <h2 className="text-sm font-semibold text-white">Macro &amp; Government Events</h2>
           <span className="ml-auto text-[10px] text-zinc-500">US CPI · The Fed · NFP · ECB · global</span>
         </div>
-        <div className="h-[460px]">
+        <div className="h-[460px] bg-[#0e1015]">
           <EconomicCalendar />
         </div>
       </div>
