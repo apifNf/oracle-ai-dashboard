@@ -35,7 +35,28 @@ export type CreateChargeResult = {
   accepted_networks: string[];
 };
 
-/** Account id konsisten lintas halaman: email sesi Supabase, fallback "default". */
+function _supabase() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  );
+}
+
+/**
+ * Account id KANONIK lintas halaman: email sesi Supabase, fallback "default".
+ * Dipakai untuk billing status, gating AI Chat, dan Market Intelligence —
+ * harus identik dengan yang dipakai saat upgrade + yang dibaca sidebar.
+ */
+export async function getAccountIdNow(): Promise<{ accountId: string; email: string | null }> {
+  try {
+    const { data } = await _supabase().auth.getSession();
+    const email = data?.session?.user?.email ?? null;
+    return { accountId: email || "default", email };
+  } catch {
+    return { accountId: "default", email: null };
+  }
+}
+
 export function useAccountId(): { accountId: string; email: string | null; ready: boolean } {
   const [state, setState] = useState<{ accountId: string; email: string | null; ready: boolean }>({
     accountId: "default",
@@ -45,24 +66,28 @@ export function useAccountId(): { accountId: string; email: string | null; ready
 
   useEffect(() => {
     let active = true;
+    let sub: { unsubscribe: () => void } | null = null;
+
+    const apply = (email: string | null) => {
+      if (active) setState({ accountId: email || "default", email, ready: true });
+    };
+
     try {
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      );
+      const supabase = _supabase();
+      // getSession() = baca cache lokal (instan), tidak menunggu roundtrip server.
       supabase.auth
-        .getUser()
-        .then(({ data }) => {
-          if (!active) return;
-          const email = data?.user?.email ?? null;
-          setState({ accountId: email || "default", email, ready: true });
-        })
-        .catch(() => active && setState((s) => ({ ...s, ready: true })));
+        .getSession()
+        .then(({ data }) => apply(data?.session?.user?.email ?? null))
+        .catch(() => apply(null));
+      sub = supabase.auth.onAuthStateChange((_e, session) =>
+        apply(session?.user?.email ?? null),
+      ).data.subscription;
     } catch {
-      setState((s) => ({ ...s, ready: true }));
+      apply(null);
     }
     return () => {
       active = false;
+      sub?.unsubscribe();
     };
   }, []);
 

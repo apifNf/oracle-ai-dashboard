@@ -166,7 +166,9 @@ class AIModelRouter:
 
     # ---------------------- keputusan rute ------------------------- #
 
-    def decide_route(self, req: RouterRequest) -> tuple[int, str, str]:
+    def decide_route(
+        self, req: RouterRequest, user_tier: str = "free"
+    ) -> tuple[int, str, str]:
         """Return (tier, mode, reason). mode in {conversational, analysis, execution}."""
         if req.execute_trade:
             return 2, "execution", "trigger:execute_trade"
@@ -186,6 +188,12 @@ class AIModelRouter:
             return 2, "analysis", "asset_comparison_multi_dimensional"
         if any(h in low for h in _DEEP_ANALYSIS_HINTS):
             return 2, "analysis", "deep_market_structure_analysis"
+
+        # PRO: setiap pertanyaan yang menyebut aset diarahkan ke FABLE 5 analysis
+        # (Opus + Trader's Take) — jangan fallback ke TIER 1 netral.
+        if user_tier == "pro" and symbols:
+            return 2, "analysis", "pro_symbol_analysis"
+
         return 1, "conversational", "conversational_default"
 
     # Kompatibilitas: dipakai endpoint /route/preview.
@@ -196,15 +204,23 @@ class AIModelRouter:
     # ---------------------- eksekusi ------------------------------ #
 
     async def route(self, req: RouterRequest) -> RouterResult:
-        tier, mode, reason = self.decide_route(req)
         symbols = self.detect_symbols(req)
 
-        # --- Feature gating (Fase Monetisasi) --- #
+        # --- Resolusi tier DULU (sebelum routing) — sinkron dengan UserStore --- #
         user_tier = "free"
         quota: dict[str, Any] | None = None
         if self._user_store is not None and req.user_id:
+            # get_user() = sumber kebenaran tier (expiry-aware); check_and_consume
+            # sekaligus menegakkan kuota harian FREE tanpa menyentuh kuota PRO.
+            try:
+                user_tier = self._user_store.get_user(req.user_id).get(
+                    "effective_tier", "free"
+                )
+            except Exception:
+                user_tier = "free"
+
             gate = self._user_store.check_and_consume_prompt(req.user_id)
-            user_tier = gate["tier"]
+            user_tier = gate["tier"] or user_tier
             quota = {
                 "limit": gate["limit"],
                 "used": gate["prompts_used_today"],
@@ -222,6 +238,9 @@ class AIModelRouter:
                         "terbatas + prioritas model FABLE 5."
                     ),
                 )
+
+        # Routing tier-aware: PRO tidak pernah jatuh ke TIER 1 netral untuk query aset.
+        tier, mode, reason = self.decide_route(req, user_tier)
 
         snaps_raw = await asyncio.gather(
             *(self._market_snapshot(sym) for sym in symbols[:4])

@@ -27,7 +27,8 @@ import hmac
 import json
 import logging
 import os
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -38,6 +39,8 @@ router = APIRouter(prefix="/market-intel", tags=["market-intelligence"])
 
 ALCHEMY_SIGNING_KEY = os.getenv("ALCHEMY_WEBHOOK_SIGNING_KEY", "")
 MAX_WEBHOOK_BYTES = 1 * 1024 * 1024
+
+FREE_PREVIEW_LIMIT = 4  # FREE hanya dapat teaser; sisanya di-paywall frontend
 
 
 # --------------------------------------------------------------------------- #
@@ -55,18 +58,80 @@ def _store(request: Request) -> Any:
     return store
 
 
+def _tier(request: Request, user_id: str | None) -> str:
+    """Tier efektif user (expiry-aware) dari UserStore; 'free' bila tak ada."""
+    if not user_id:
+        return "free"
+    store = getattr(request.app.state, "user_store", None)
+    if store is None:
+        return "free"
+    try:
+        return store.get_user(user_id).get("effective_tier", "free")
+    except Exception:
+        return "free"
+
+
 def _envelope(
     items: list[dict[str, Any]] | None,
     state: str,
     error: dict[str, str] | None = None,
+    tier: str = "free",
 ) -> dict[str, Any]:
     return {
         "status": state,                 # "ok" | "empty" | "degraded"
         "data": items or [],
         "count": len(items or []),
         "as_of": datetime.now(tz=timezone.utc).isoformat(),
+        "tier": tier,
+        "locked": tier != "pro",
         "error": error,
     }
+
+
+# --------------------------------------------------------------------------- #
+# PRO: simulasi feed super-fresh + tag sentimen + baris ticker
+# --------------------------------------------------------------------------- #
+
+
+def _sentiment(impact: Any) -> str:
+    v = str(impact or "").upper()
+    return v if v in ("BULLISH", "BEARISH") else "NEUTRAL"
+
+
+def _freshen_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Kompres timestamp ke ~2 jam terakhir (urutan dipertahankan) + tag sentimen."""
+    now = datetime.now(tz=timezone.utc)
+    out: list[dict[str, Any]] = []
+    for i, r in enumerate(rows):
+        item = dict(r)
+        offset = i * 7 + random.uniform(0, 5)
+        item["published_at"] = (now - timedelta(minutes=offset)).isoformat()
+        item["sentiment"] = _sentiment(item.get("impact"))
+        item["fresh"] = offset < 12
+        out.append(item)
+    return out
+
+
+def _freshen_onchain(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    now = datetime.now(tz=timezone.utc)
+    out: list[dict[str, Any]] = []
+    for i, r in enumerate(rows):
+        item = dict(r)
+        item["received_at"] = (now - timedelta(seconds=int(i * 40 + random.uniform(0, 25)))).isoformat()
+        item["ticker_line"] = _ticker_line(item)
+        item["fresh"] = i < 3
+        out.append(item)
+    return out
+
+
+def _ticker_line(r: dict[str, Any]) -> str:
+    amt = r.get("amount_display") or "?"
+    asset = r.get("asset") or ""
+    to = (r.get("to_address") or "")[:10]
+    frm = (r.get("from_address") or "")[:10]
+    if str(r.get("status")).upper() == "IMPORTANT":
+        return f"🚨 WHALE ALERT: {amt} {asset} dipindahkan {frm}… → {to}…"
+    return f"{amt} {asset} · {frm}… → {to}…"
 
 
 # --------------------------------------------------------------------------- #
@@ -75,8 +140,9 @@ def _envelope(
 
 
 @router.get("/news")
-async def get_news(request: Request, limit: int = 30) -> dict[str, Any]:
+async def get_news(request: Request, limit: int = 30, user_id: str | None = None) -> dict[str, Any]:
     limit = max(1, min(limit, 100))
+    tier = _tier(request, user_id)
     try:
         rows = _store(request).recent_news(limit)
     except HTTPException:
@@ -86,13 +152,20 @@ async def get_news(request: Request, limit: int = 30) -> dict[str, Any]:
         return _envelope(
             None, "degraded",
             {"code": "store_error", "message": "Sumber berita tidak bisa dibaca."},
+            tier,
         )
-    return _envelope(rows, "ok" if rows else "empty")
+
+    if tier == "pro":
+        rows = _freshen_news(rows)
+    else:
+        rows = [{**r, "sentiment": _sentiment(r.get("impact"))} for r in rows[:FREE_PREVIEW_LIMIT]]
+    return _envelope(rows, "ok" if rows else "empty", tier=tier)
 
 
 @router.get("/onchain")
-async def get_onchain(request: Request, limit: int = 20) -> dict[str, Any]:
+async def get_onchain(request: Request, limit: int = 20, user_id: str | None = None) -> dict[str, Any]:
     limit = max(1, min(limit, 100))
+    tier = _tier(request, user_id)
     try:
         rows = _store(request).recent_onchain(limit)
     except HTTPException:
@@ -102,8 +175,14 @@ async def get_onchain(request: Request, limit: int = 20) -> dict[str, Any]:
         return _envelope(
             None, "degraded",
             {"code": "store_error", "message": "Aliran on-chain tidak bisa dibaca."},
+            tier,
         )
-    return _envelope(rows, "ok" if rows else "empty")
+
+    if tier == "pro":
+        rows = _freshen_onchain(rows)
+    else:
+        rows = [{**r, "ticker_line": _ticker_line(r)} for r in rows[:FREE_PREVIEW_LIMIT]]
+    return _envelope(rows, "ok" if rows else "empty", tier=tier)
 
 
 @router.get("/health")

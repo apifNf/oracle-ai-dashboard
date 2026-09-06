@@ -4,6 +4,7 @@ import { Activity, TrendingUp, ShieldAlert, BookOpen, Terminal, Send, Zap, Globe
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { formatFable5Decision } from "@/lib/fable5";
+import { getAccountIdNow } from "@/lib/billing";
 
 // Backend FastAPI lokal (absolut). Konsisten dengan scanner / ai-chat.
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
@@ -130,12 +131,13 @@ export default function DashboardPage() {
 
     try {
       // AI Router lokal: TIER 1 (GPT-4o) untuk tanya umum, TIER 2 (FABLE 5 /
-      // Claude) untuk analisa mendalam / eksekusi. Bahasa balasan sudah
-      // ditangani system prompt backend.
+      // Claude) untuk analisa mendalam / eksekusi. Kirim account_id supaya
+      // status PRO ikut terbaca (Trader's Take, dst).
+      const { accountId, email } = await getAccountIdNow();
       const res = await fetch(`${API_BASE}/api/v1/ai/route`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: currentPrompt }),
+        body: JSON.stringify({ prompt: currentPrompt, account_id: accountId, user_id: accountId, email }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

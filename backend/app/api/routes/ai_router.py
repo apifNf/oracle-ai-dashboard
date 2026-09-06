@@ -31,6 +31,7 @@ class AIRouteRequest(BaseModel):
     risk_params: dict[str, Any] = Field(default_factory=dict)
     history: list[dict[str, str]] = Field(default_factory=list)
     user_id: str | None = None
+    account_id: str | None = None
     email: str | None = None
 
 
@@ -55,7 +56,7 @@ def _to_router_request(body: AIRouteRequest) -> RouterRequest:
         symbol=body.symbol,
         risk_params=body.risk_params,
         history=body.history,
-        user_id=body.user_id or body.email,
+        user_id=body.user_id or body.account_id or body.email,
     )
 
 

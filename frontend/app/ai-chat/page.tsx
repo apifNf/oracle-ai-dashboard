@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { formatFable5Decision } from "@/lib/fable5";
 import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
 import { proposalParamsFromDecision, extractProposalFromText, type ProposalParams } from "@/lib/trade";
-import { useAccountId, fetchBillingStatus, type BillingStatus } from "@/lib/billing";
+import { useAccountId, getAccountIdNow, fetchBillingStatus, type BillingStatus } from "@/lib/billing";
 import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 
@@ -133,15 +133,29 @@ export default function AiChatPage() {
           content: data.message || data.reply || "Visual analysis complete."
         }]);
       } else {
+        // Resolusi account id FRESH saat kirim — jangan andalkan state yang
+        // mungkin belum sinkron (sumber bug tier PRO -> FREE).
+        const { accountId: uid, email: mail } = await getAccountIdNow();
+
         // AI Router lokal: TIER 1 (GPT-4o) -> data.reply,
         // TIER 2 (FABLE 5 / Claude) -> data.decision (JSON keputusan kuant).
         res = await fetch(`${API_BASE_URL}/api/v1/ai/route`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: currentPrompt, user_id: accountId, email }),
+          body: JSON.stringify({
+            prompt: currentPrompt,
+            account_id: uid,
+            user_id: uid,
+            email: mail,
+          }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         data = await res.json();
+
+        // Selaraskan tier lokal dengan yang dilaporkan backend.
+        if (data.user_tier && data.user_tier !== (billing?.tier ?? "free")) {
+          refreshBilling();
+        }
 
         // Sinkron kuota dari respons.
         if (data.quota) {
