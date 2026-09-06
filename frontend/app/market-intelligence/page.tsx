@@ -1,16 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Globe, TrendingUp, TrendingDown, AlertCircle, Activity, ExternalLink,
-  Loader2, Clock, Box, Zap, ArrowRight, Wallet, WifiOff, RefreshCw, Inbox,
+  Globe, ExternalLink, Lock, Loader2, Radio, CalendarClock,
+  TrendingUp, TrendingDown, Minus, Zap,
 } from "lucide-react";
+import { useAccountId, fetchBillingStatus } from "@/lib/billing";
+import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
+import { EconomicCalendar } from "@/components/market-intel/economic-calendar";
+import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
-/* Tipe                                                                */
-/* ------------------------------------------------------------------ */
+const API_ROOT = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE = `${API_ROOT}/api/v1/market-intel`;
 
-type Impact = "BULLISH" | "BEARISH" | "IMPORTANT" | "NEUTRAL" | null;
+type Sentiment = "BULLISH" | "BEARISH" | "NEUTRAL";
 
 type NewsItem = {
   id: string;
@@ -19,187 +22,111 @@ type NewsItem = {
   url: string;
   image_url: string | null;
   published_at: string;
-  impact: Impact;
+  impact: string | null;
+  sentiment?: Sentiment;
+  fresh?: boolean;
 };
 
 type OnChainItem = {
   id: string;
-  event_type: string;
-  network: string | null;
+  event_type?: string;
   asset: string | null;
   amount_display: string | null;
+  amount_usd?: number | null;
+  side?: string;
   from_address: string | null;
   to_address: string | null;
-  tx_hash: string | null;
-  block_number: number | null;
   status: string;
   received_at: string;
+  ticker_line?: string;
+  ticker_sub?: string;
 };
 
-/** Amplop yang dikembalikan backend. Frontend membaca `status`, tidak menebak. */
 type Envelope<T> = {
   status: "ok" | "empty" | "degraded";
   data: T[];
   count: number;
   as_of: string;
+  tier: "free" | "pro";
+  locked: boolean;
   error: { code: string; message: string } | null;
 };
 
-/** Kondisi panel di UI. "error" WAJIB dibedakan dari "empty". */
-type PanelState = "loading" | "ok" | "empty" | "error";
-
-const API_BASE = "/api/v1/market-intel";
-const ONCHAIN_REFRESH_MS = 30_000;
-const NEWS_REFRESH_MS = 120_000;
-
-/* ------------------------------------------------------------------ */
-/* Helper                                                              */
 /* ------------------------------------------------------------------ */
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
-  const diff = Math.max(0, Date.now() - then);
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "baru saja";
-  if (mins < 60) return `${mins} menit lalu`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} jam lalu`;
-  return `${Math.floor(hours / 24)} hari lalu`;
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 45) return "Baru saja";
+  if (s < 3600) return `${Math.floor(s / 60)} mnt lalu`;
+  if (s < 86400) return `${Math.floor(s / 3600)} jam lalu`;
+  return `${Math.floor(s / 86400)} hari lalu`;
 }
 
-function shortAddress(value: string | null): string {
-  if (!value) return "—";
-  return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
-}
-
-/** Badge status yang jujur. Tidak pernah menampilkan "Live" saat data gagal. */
-function FeedBadge({ state, lastOk }: { state: PanelState; lastOk: Date | null }) {
-  if (state === "error") {
-    return (
-      <span className="text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2.5 py-1 rounded-full flex items-center gap-1.5">
-        <WifiOff className="w-3 h-3" /> Terputus
-      </span>
-    );
-  }
-  if (state === "loading") {
-    return (
-      <span className="text-xs font-medium bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400 px-2.5 py-1 rounded-full flex items-center gap-1.5">
-        <RefreshCw className="w-3 h-3 animate-spin" /> Memuat
-      </span>
-    );
-  }
-  const stale = lastOk !== null && Date.now() - lastOk.getTime() > 5 * 60_000;
-  if (stale) {
-    return (
-      <span className="text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1.5">
-        <Clock className="w-3 h-3" /> Tertunda
-      </span>
-    );
-  }
+function SentimentChip({ s }: { s: Sentiment }) {
+  const map = {
+    BULLISH: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25",
+    BEARISH: "bg-rose-500/10 text-rose-400 border-rose-500/25",
+    NEUTRAL: "bg-zinc-500/10 text-zinc-400 border-zinc-500/25",
+  } as const;
+  const Icon = s === "BULLISH" ? TrendingUp : s === "BEARISH" ? TrendingDown : Minus;
   return (
-    <span className="text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1.5">
-      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+    <span className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border", map[s])}>
+      <Icon className="w-3 h-3" />
+      {s}
     </span>
   );
 }
 
-function PanelMessage({
-  icon, title, detail, onRetry,
-}: { icon: React.ReactNode; title: string; detail: string; onRetry?: () => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center text-center py-16 px-6 rounded-xl border border-dashed border-slate-200 dark:border-zinc-800">
-      <div className="text-slate-400 dark:text-zinc-600 mb-3">{icon}</div>
-      <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">{title}</p>
-      <p className="text-xs text-slate-500 dark:text-zinc-500 mt-1 max-w-xs">{detail}</p>
-      {onRetry && (
-        <button
-          onClick={onRetry}
-          className="mt-4 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
-        >
-          Coba lagi
-        </button>
-      )}
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------------ */
-/* Hook fetch                                                          */
+/* Data hook                                                           */
 /* ------------------------------------------------------------------ */
 
-function useFeed<T>(path: string, intervalMs: number) {
+function useFeed<T>(path: string, intervalMs: number, accountId: string) {
   const [items, setItems] = useState<T[]>([]);
-  const [state, setState] = useState<PanelState>("loading");
-  const [lastOk, setLastOk] = useState<Date | null>(null);
-  const [detail, setDetail] = useState<string>("");
-
-  const abortRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
+  const [tier, setTier] = useState<"free" | "pro">("free");
+  const [locked, setLocked] = useState(true);
+  const [state, setState] = useState<"loading" | "ok" | "empty" | "error">("loading");
+  const mounted = useRef(true);
 
   const load = useCallback(
-    async (isInitial: boolean) => {
-      // Batalkan request sebelumnya supaya respons lambat tidak menimpa yang baru.
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      if (isInitial) setState("loading");
-
+    async (initial: boolean) => {
+      if (initial) setState("loading");
       try {
-        const res = await fetch(`${API_BASE}${path}`, {
-          signal: controller.signal,
-          headers: { Accept: "application/json" },
-          credentials: "same-origin",
-        });
-
+        const res = await fetch(
+          `${API_BASE}${path}?user_id=${encodeURIComponent(accountId)}`,
+          { headers: { Accept: "application/json" } },
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
         const body: Envelope<T> = await res.json();
-
-        // Validasi bentuk. Tanpa ini, respons error akan membuat .map() melempar
-        // dan seluruh halaman jadi blank.
-        if (!body || !Array.isArray(body.data)) {
-          throw new Error("Bentuk respons tidak dikenali");
-        }
-
-        if (!mountedRef.current) return;
-
+        if (!mounted.current || !Array.isArray(body.data)) return;
+        setTier(body.tier);
+        setLocked(body.locked);
         if (body.status === "degraded") {
           setState("error");
-          setDetail(body.error?.message ?? "Sumber data sedang bermasalah.");
-          return; // pertahankan data lama di layar, jangan dikosongkan
+          return;
         }
-
         setItems(body.data);
-        setLastOk(new Date());
-        setState(body.data.length > 0 ? "ok" : "empty");
-        setDetail("");
-      } catch (err) {
-        if (controller.signal.aborted || !mountedRef.current) return;
-        // Kegagalan dicatat dan ditampilkan, bukan ditelan diam-diam.
-        console.error(`[market-intel] gagal memuat ${path}:`, err);
-        setState("error");
-        setDetail(
-          err instanceof Error ? err.message : "Gangguan jaringan tidak diketahui.",
-        );
+        setState(body.data.length ? "ok" : "empty");
+      } catch {
+        if (mounted.current) setState("error");
       }
     },
-    [path],
+    [path, accountId],
   );
 
   useEffect(() => {
-    mountedRef.current = true;
+    mounted.current = true;
     void load(true);
-    const timer = setInterval(() => void load(false), intervalMs);
+    const t = setInterval(() => void load(false), intervalMs);
     return () => {
-      mountedRef.current = false;
-      clearInterval(timer);
-      abortRef.current?.abort();
+      mounted.current = false;
+      clearInterval(t);
     };
   }, [load, intervalMs]);
 
-  return { items, state, lastOk, detail, reload: () => void load(true) };
+  return { items, tier, locked, state, reload: () => void load(true) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -207,225 +134,291 @@ function useFeed<T>(path: string, intervalMs: number) {
 /* ------------------------------------------------------------------ */
 
 export default function MarketIntelligencePage() {
-  const news = useFeed<NewsItem>("/news", NEWS_REFRESH_MS);
-  const chain = useFeed<OnChainItem>("/onchain", ONCHAIN_REFRESH_MS);
+  const { accountId, ready } = useAccountId();
+  const [tier, setTier] = useState<"free" | "pro">("free");
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  useEffect(() => {
+    if (!ready) return;
+    fetchBillingStatus(accountId).then((s) => s && setTier(s.tier));
+    const t = setInterval(
+      () => fetchBillingStatus(accountId).then((s) => s && setTier(s.tier)),
+      15_000,
+    );
+    return () => clearInterval(t);
+  }, [accountId, ready]);
+
+  const news = useFeed<NewsItem>("/news", 45_000, accountId);
+  const chain = useFeed<OnChainItem>("/onchain", 12_000, accountId);
+
+  const isPro = tier === "pro" || news.tier === "pro" || chain.tier === "pro";
 
   return (
-    <div className="space-y-6 relative">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400">
             Market Intelligence
           </p>
           <h1 className="mt-2 text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50">
-            <Globe className="w-8 h-8 text-emerald-600 dark:text-emerald-500" /> Macro &amp; On-Chain
+            <Globe className="w-8 h-8 text-emerald-500" />
+            {isPro ? "Analytical Terminal" : "Macro & On-Chain"}
           </h1>
+        </div>
+        {isPro && (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            LIVE · PRO FEED
+          </span>
+        )}
+      </div>
+
+      {isPro ? (
+        <AnalyticalTerminal news={news.items} chain={chain.items} loading={news.state === "loading"} />
+      ) : (
+        <PaywallView
+          news={news.items}
+          chain={chain.items}
+          loading={news.state === "loading"}
+          onUpgrade={() => setUpgradeOpen(true)}
+        />
+      )}
+
+      <UpgradeToProModal
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        accountId={accountId}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PRO — Analytical Terminal                                           */
+/* ------------------------------------------------------------------ */
+
+function AnalyticalTerminal({
+  news,
+  chain,
+  loading,
+}: {
+  news: NewsItem[];
+  chain: OnChainItem[];
+  loading: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Alpha / Macro news — dengan thumbnail */}
+        <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-[#0e1015]/70 backdrop-blur-md shadow-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
+            <Zap className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-sm font-semibold text-white">Alpha News Feed</h2>
+            <span className="ml-auto text-[10px] font-mono text-zinc-500">{news.length} headline · CryptoCompare / RSS live</span>
+          </div>
+          <div className="max-h-[560px] lg:max-h-[calc(100vh-24rem)] overflow-y-auto divide-y divide-white/5">
+            {loading && news.length === 0 ? (
+              <div className="p-8 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
+            ) : news.length === 0 ? (
+              <p className="p-6 text-sm text-zinc-500">Belum ada headline.</p>
+            ) : (
+              news.map((n) => (
+                <a
+                  key={n.id}
+                  href={n.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-3 px-4 py-3 hover:bg-white/[0.03] transition-colors group"
+                >
+                  {n.image_url ? (
+                    <img
+                      src={n.image_url}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                      }}
+                      className="w-16 h-16 rounded-lg object-cover shrink-0 border border-white/10 bg-white/5"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-lg shrink-0 border border-white/10 bg-white/[0.03] flex items-center justify-center">
+                      <Globe className="w-5 h-5 text-zinc-700" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <SentimentChip s={(n.sentiment as Sentiment) ?? "NEUTRAL"} />
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 truncate">{n.source}</span>
+                      <span className="ml-auto text-[10px] font-mono text-zinc-500 shrink-0">{relativeTime(n.published_at)}</span>
+                    </div>
+                    <p className="text-sm text-zinc-200 leading-snug group-hover:text-emerald-300 transition-colors line-clamp-2">
+                      {n.title}
+                      <ExternalLink className="inline w-3 h-3 ml-1 opacity-0 group-hover:opacity-100 text-emerald-400" />
+                    </p>
+                  </div>
+                </a>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* On-Chain Stream — HARDCORE TERMINAL */}
+        <div className="lg:col-span-1 rounded-2xl border border-emerald-500/15 bg-black/90 shadow-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-emerald-500/15 bg-black">
+            <Radio className="w-3.5 h-3.5 text-emerald-400" />
+            <h2 className="text-xs font-mono font-semibold text-emerald-400 tracking-wide">oracle@onchain — stream</h2>
+            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_#10b981]" />
+          </div>
+          <div className="max-h-[560px] lg:max-h-[calc(100vh-24rem)] overflow-y-auto p-2 font-mono text-[11px] leading-relaxed bg-black/90">
+            {chain.length === 0 ? (
+              <p className="p-3 text-emerald-700 animate-pulse">
+                &gt; awaiting whale flow (&gt; $250k)<span className="animate-ping">_</span>
+              </p>
+            ) : (
+              chain.map((c) => {
+                const alert = String(c.status).toUpperCase() === "IMPORTANT";
+                return (
+                  <div
+                    key={c.id}
+                    className={cn(
+                      "px-2 py-1 rounded",
+                      alert
+                        ? "text-amber-300 [text-shadow:0_0_8px_rgba(245,158,11,0.35)]"
+                        : "text-emerald-400/90",
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="text-zinc-600 shrink-0">[LIVE]</span>
+                      <span className="flex-1 break-words">{c.ticker_line}</span>
+                      <span className="text-zinc-700 shrink-0">{relativeTime(c.received_at)}</span>
+                    </div>
+                    {c.ticker_sub && (
+                      <div className="pl-[3.2rem] text-zinc-600 break-all">{c.ticker_sub}</div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
-        {/* ---------------- KIRI: BERITA ---------------- */}
-        <div className="xl:col-span-2 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-200 dark:border-zinc-800 pb-3">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Globe className="w-5 h-5 text-slate-500 dark:text-zinc-500" /> Alpha News Feed
-            </h2>
-            <FeedBadge state={news.state} lastOk={news.lastOk} />
-          </div>
+      {/* Macro & Government Events — TradingView Economic Calendar (forced dark) */}
+      <div className="rounded-2xl border border-white/10 bg-[#0e1015] shadow-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10 bg-[#0e1015]/70 backdrop-blur-md">
+          <CalendarClock className="w-4 h-4 text-indigo-400" />
+          <h2 className="text-sm font-semibold text-white">Macro &amp; Government Events</h2>
+          <span className="ml-auto text-[10px] text-zinc-500">US CPI · The Fed · NFP · ECB · global</span>
+        </div>
+        <div className="h-[460px] bg-[#131722]">
+          <EconomicCalendar />
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          <div className="space-y-4 relative min-h-[400px] max-h-[750px] overflow-y-auto pr-2 pb-4 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-zinc-700 scrollbar-track-transparent">
-            {news.state === "loading" && news.items.length === 0 ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 dark:text-zinc-500">
-                <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-4" />
-                <p className="text-sm font-medium">Memuat berita…</p>
+/* ------------------------------------------------------------------ */
+/* FREE — Glassmorphic Blur Paywall                                    */
+/* ------------------------------------------------------------------ */
+
+function PaywallView({
+  news,
+  chain,
+  loading,
+  onUpgrade,
+}: {
+  news: NewsItem[];
+  chain: OnChainItem[];
+  loading: boolean;
+  onUpgrade: () => void;
+}) {
+  const teaser = news.slice(0, 1);
+  const blurredNews = news.slice(1);
+
+  return (
+    <div className="space-y-4">
+      {/* Preview kecil — data lama, tajam */}
+      <div>
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-2 flex items-center gap-2">
+          <Globe className="w-4 h-4" /> Alpha News Feed <span className="text-[10px] text-zinc-500">(preview)</span>
+        </h2>
+        {loading && teaser.length === 0 ? (
+          <div className="p-6 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
+        ) : (
+          teaser.map((n) => (
+            <a
+              key={n.id}
+              href={n.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-4 hover:border-emerald-500/30 transition-colors"
+            >
+              {n.image_url && (
+                <img
+                  src={n.image_url}
+                  alt=""
+                  loading="lazy"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                  className="w-16 h-16 rounded-lg object-cover shrink-0 border border-white/10"
+                />
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <SentimentChip s={(n.sentiment as Sentiment) ?? "NEUTRAL"} />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 truncate">{n.source}</span>
+                  <span className="ml-auto text-[10px] text-zinc-500 shrink-0">{relativeTime(n.published_at)}</span>
+                </div>
+                <p className="text-sm text-slate-800 dark:text-zinc-200">{n.title}</p>
               </div>
-            ) : news.state === "error" && news.items.length === 0 ? (
-              <PanelMessage
-                icon={<WifiOff className="w-8 h-8" />}
-                title="Berita tidak bisa dimuat"
-                detail={news.detail}
-                onRetry={news.reload}
-              />
-            ) : news.state === "empty" ? (
-              <PanelMessage
-                icon={<Inbox className="w-8 h-8" />}
-                title="Belum ada berita"
-                detail="Feed terhubung, tetapi belum ada item baru."
-              />
-            ) : (
-              <>
-                {news.state === "error" && (
-                  <div className="text-xs text-amber-700 dark:text-amber-500 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 rounded-lg px-3 py-2">
-                    Pembaruan terakhir gagal. Menampilkan data sebelumnya.
-                  </div>
-                )}
-                {news.items.map((item) => (
-                  <a
-                    key={item.id}
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="relative flex flex-col sm:flex-row gap-4 p-4 bg-white border border-slate-200 dark:bg-[#09090b]/80 dark:border-zinc-800/80 rounded-xl transition-all duration-500 group hover:border-emerald-500/30 hover:bg-emerald-50/30 dark:hover:bg-emerald-900/5 hover:shadow-[0_8px_30px_rgba(16,185,129,0.06)] overflow-hidden"
-                  >
-                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500/70 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            </a>
+          ))
+        )}
+      </div>
 
-                    {item.image_url && (
-                      <div className="sm:w-28 sm:h-24 shrink-0 rounded-lg overflow-hidden bg-slate-100 dark:bg-zinc-800/50 relative">
-                        <img
-                          src={item.image_url}
-                          alt=""
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                          loading="lazy"
-                          onError={(e) => {
-                            (e.currentTarget.parentElement as HTMLElement).style.display = "none";
-                          }}
-                        />
-                      </div>
-                    )}
-
-                    <div className="flex-1 min-w-0 relative z-10">
-                      <div className="flex justify-between items-start gap-4 mb-2">
-                        <span className="text-xs font-bold text-slate-500 dark:text-zinc-500 tracking-wide uppercase group-hover:text-emerald-600 transition-colors duration-500">
-                          {item.source}
-                        </span>
-                        {/* impact === null berarti belum diklasifikasi.
-                            Ditampilkan apa adanya, tidak dipaksa jadi NEUTRAL. */}
-                        {item.impact ? (
-                          <span
-                            title="Klasifikasi otomatis, bukan nasihat keuangan"
-                            className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded flex items-center shrink-0 gap-1 ${
-                              item.impact === "BULLISH"
-                                ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-500"
-                                : item.impact === "BEARISH"
-                                ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-500"
-                                : "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-500"
-                            }`}
-                          >
-                            {item.impact === "BULLISH" && <TrendingUp className="w-3 h-3" />}
-                            {item.impact === "BEARISH" && <TrendingDown className="w-3 h-3" />}
-                            {item.impact === "IMPORTANT" && <AlertCircle className="w-3 h-3" />}
-                            {item.impact}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-medium uppercase tracking-wider px-2 py-1 rounded shrink-0 bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-500">
-                            Belum dinilai
-                          </span>
-                        )}
-                      </div>
-
-                      <h3 className="text-sm sm:text-base font-medium text-slate-900 dark:text-zinc-100 leading-snug group-hover:text-emerald-700 dark:group-hover:text-emerald-400 flex items-start justify-between gap-4 transition-colors duration-500">
-                        <span className="line-clamp-2">{item.title}</span>
-                        <ExternalLink className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity duration-500 shrink-0 mt-1 text-emerald-500/70" />
-                      </h3>
-
-                      <p className="text-xs text-slate-500 dark:text-zinc-500 mt-2">
-                        {relativeTime(item.published_at)}
-                      </p>
-                    </div>
-                  </a>
-                ))}
-              </>
-            )}
-          </div>
+      {/* Region terkunci — blur tebal + paywall */}
+      <div className="relative rounded-2xl border border-white/10 overflow-hidden min-h-[420px]">
+        <div className="blur-[7px] opacity-50 pointer-events-none select-none p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {(blurredNews.length ? blurredNews : news).map((n) => (
+            <div key={n.id} className="rounded-xl border border-white/10 bg-[#0e1015]/60 p-4">
+              <p className="text-[10px] font-bold uppercase text-zinc-500 mb-1">{n.source}</p>
+              <p className="text-sm text-zinc-300">{n.title}</p>
+            </div>
+          ))}
+          {chain.map((c) => (
+            <div key={c.id} className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-4 font-mono text-xs text-amber-300">
+              🚨 {c.amount_display} {c.asset} · whale flow on-chain
+            </div>
+          ))}
+          {news.length === 0 && (
+            <>
+              <div className="h-24 rounded-xl border border-white/10 bg-[#0e1015]/60" />
+              <div className="h-24 rounded-xl border border-white/10 bg-[#0e1015]/60" />
+              <div className="h-24 rounded-xl border border-white/10 bg-[#0e1015]/60" />
+              <div className="h-24 rounded-xl border border-white/10 bg-[#0e1015]/60" />
+            </>
+          )}
         </div>
 
-        {/* ---------------- KANAN: ON-CHAIN ---------------- */}
-        <div className="xl:col-span-1 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-200 dark:border-zinc-800 pb-3">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Activity className="w-5 h-5 text-emerald-600 dark:text-emerald-500" /> On-Chain Stream
-            </h2>
-            <FeedBadge state={chain.state} lastOk={chain.lastOk} />
-          </div>
-
-          <div className="space-y-3 relative min-h-[450px]">
-            {chain.state === "loading" && chain.items.length === 0 ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-slate-50/80 dark:bg-[#09090b]/60 border border-slate-200 dark:border-zinc-800/80">
-                <Loader2 className="w-7 h-7 animate-spin text-emerald-500 mb-3" />
-                <span className="text-slate-600 dark:text-zinc-400 text-xs font-medium tracking-wide">
-                  Memuat aliran on-chain…
-                </span>
-              </div>
-            ) : chain.state === "error" && chain.items.length === 0 ? (
-              <PanelMessage
-                icon={<WifiOff className="w-8 h-8" />}
-                title="Aliran on-chain terputus"
-                detail={chain.detail}
-                onRetry={chain.reload}
-              />
-            ) : chain.state === "empty" ? (
-              <PanelMessage
-                icon={<Inbox className="w-8 h-8" />}
-                title="Belum ada aktivitas"
-                detail="Webhook terhubung, belum ada event masuk."
-              />
-            ) : (
-              chain.items.map((item) => (
-                <div
-                  key={item.id}
-                  className="relative p-4 bg-white border border-slate-200 dark:bg-[#09090b]/80 dark:border-zinc-800/80 rounded-xl hover:border-emerald-500/30 transition-all duration-300 group"
-                >
-                  <div className="flex justify-between items-center mb-3">
-                    <div className="flex items-center gap-2">
-                      {item.event_type === "BLOCK" ? (
-                        <Box className="w-4 h-4 text-slate-500 dark:text-zinc-500" />
-                      ) : (
-                        <Zap className={`w-4 h-4 ${item.status === "IMPORTANT" ? "text-amber-500" : "text-emerald-600 dark:text-emerald-500/80"}`} />
-                      )}
-                      <span className={`text-xs font-semibold uppercase tracking-wider ${item.status === "IMPORTANT" ? "text-amber-600 dark:text-amber-500" : "text-slate-600 dark:text-zinc-400"}`}>
-                        {item.event_type}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800/50 px-2 py-1 rounded-md">
-                      <Clock className="w-3 h-3 text-slate-400 dark:text-zinc-500" />
-                      <span className="text-[10px] font-mono text-slate-700 dark:text-zinc-300">
-                        {relativeTime(item.received_at)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-end gap-2 mb-2">
-                    <h4 className="text-2xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-cyan-600 dark:from-emerald-400 dark:to-cyan-400">
-                      {item.amount_display ?? "—"}
-                    </h4>
-                    <span className="text-sm font-bold text-slate-500 dark:text-zinc-400 mb-1">
-                      {item.asset ?? ""}
-                    </span>
-                  </div>
-
-                  {(item.from_address || item.to_address) && (
-                    <div className="flex items-center justify-between mt-3 mb-2 text-[10px] font-mono w-full bg-slate-50 dark:bg-zinc-900/50 p-2 rounded-lg border border-slate-200 dark:border-zinc-800/50">
-                      <div className="flex items-center gap-1.5">
-                        <Wallet className="w-3 h-3 text-slate-500 dark:text-slate-400" />
-                        <span className="text-slate-600 dark:text-zinc-400">
-                          {shortAddress(item.from_address)}
-                        </span>
-                      </div>
-                      <ArrowRight className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 opacity-50" />
-                      <div className="flex items-center gap-1.5">
-                        <Wallet className="w-3 h-3 text-slate-500 dark:text-slate-400" />
-                        <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-                          {shortAddress(item.to_address)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 dark:border-zinc-800/50">
-                    <p className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 truncate mr-2">
-                      {item.network ?? "—"} · {shortAddress(item.tx_hash)}
-                    </p>
-                    <span
-                      className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        item.status === "IMPORTANT"
-                          ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)] animate-pulse"
-                          : "bg-emerald-500"
-                      }`}
-                    />
-                  </div>
-                </div>
-              ))
-            )}
+        <div className="absolute inset-0 bg-black/55 backdrop-blur-md flex items-center justify-center p-6">
+          <div className="max-w-md w-full text-center rounded-2xl border border-white/10 bg-[#0e1015]/85 backdrop-blur-xl p-6 shadow-2xl">
+            <div className="mx-auto mb-3 w-11 h-11 rounded-full bg-amber-500/10 border border-amber-400/30 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.35)]">
+              <Lock className="w-5 h-5 text-amber-400" />
+            </div>
+            <h3 className="text-base font-semibold text-white">
+              Upgrade ke PRO untuk Real-Time Alpha Feed &amp; Deep On-Chain Stream
+            </h3>
+            <p className="mt-2 text-sm text-zinc-400">
+              Live CryptoCompare / RSS news dengan thumbnail &amp; tag sentimen, terminal
+              whale-alert on-chain real-time (&gt; $500k), dan Kalender Ekonomi Makro
+              (US CPI, The Fed, NFP). FREE hanya melihat cuplikan berita.
+            </p>
+            <button
+              onClick={onUpgrade}
+              className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-amber-500 hover:from-emerald-400 hover:to-amber-400 py-2.5 px-4 font-semibold text-black shadow-lg transition"
+            >
+              <Lock className="w-4 h-4" /> Upgrade ke PRO — $49/bln (USDC/USDT)
+            </button>
           </div>
         </div>
       </div>

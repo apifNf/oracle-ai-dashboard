@@ -3,6 +3,11 @@
 import { Activity, TrendingUp, ShieldAlert, BookOpen, Terminal, Send, Zap, Globe, ArrowUpRight, BrainCircuit, Settings2, Radar } from "lucide-react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { formatFable5Decision } from "@/lib/fable5";
+import { getAccountIdNow } from "@/lib/billing";
+
+// Backend FastAPI lokal (absolut). Konsisten dengan scanner / ai-chat.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 // 1. Placeholder untuk Top 15 Aset
 const top15Symbols = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "AVAX", "LINK", "DOT", "SHIB", "LTC", "BCH", "NEAR"];
@@ -22,6 +27,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [tickers, setTickers] = useState(initialTickers);
   const [activeSignals, setActiveSignals] = useState<number | string>("Scanning...");
+  const [ledger, setLedger] = useState<{ count: number; balance: number } | null>(null);
 
   // 2. ENGINE PENYEDOT HARGA (Jalur VIP Binance Vision anti-blokir)
   useEffect(() => {
@@ -63,17 +69,53 @@ export default function DashboardPage() {
       }
     };
 
-    const runScannerEngine = () => {
-      setTimeout(() => {
-        setActiveSignals(7);
-      }, 2000); 
+    // Sinkron dengan Live Signal Scanner: jumlah sinyal directional aktif
+    // (LONG / SHORT) dari snapshot backend yang sama dengan halaman /scanner.
+    const fetchActiveSignals = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/scanner/signals`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const signals: any[] = Array.isArray(data?.signals) ? data.signals : [];
+        const active = signals.filter(
+          (s) => s?.signal === "LONG" || s?.signal === "SHORT",
+        ).length;
+        setActiveSignals(active);
+      } catch (error) {
+        console.error("Gagal sinkronisasi Alpha Signals dari scanner:", error);
+        setActiveSignals((prev) => (typeof prev === "number" ? prev : "—"));
+      }
+    };
+
+    // Trade Ledger — jumlah trade dieksekusi + saldo virtual dari Trade Engine.
+    const fetchLedger = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/trade/account?account_id=default`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const acc = data?.account;
+        if (acc) setLedger({ count: acc.total_trades ?? 0, balance: acc.balance_usdt ?? 0 });
+      } catch (error) {
+        console.error("Gagal memuat Trade Ledger:", error);
+      }
     };
 
     fetchTickers();
-    runScannerEngine();
-    
-    const interval = setInterval(fetchTickers, 5000); 
-    return () => clearInterval(interval);
+    fetchActiveSignals();
+    fetchLedger();
+
+    const tickerInterval = setInterval(fetchTickers, 5000);
+    const signalInterval = setInterval(fetchActiveSignals, 10000);
+    const ledgerInterval = setInterval(fetchLedger, 15000);
+    return () => {
+      clearInterval(tickerInterval);
+      clearInterval(signalInterval);
+      clearInterval(ledgerInterval);
+    };
   }, []);
 
   // 3. HANDLER UNTUK QUICK ASK ORACLE (Smart Language Detect)
@@ -82,42 +124,46 @@ export default function DashboardPage() {
     if (!prompt.trim()) return;
 
     setIsLoading(true);
-    setResponse(""); 
-    
-    try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "https://oracle-ai-dashboard.onrender.com";
-      
-      // Injeksi instruksi cerdas untuk menyesuaikan bahasa secara otomatis
-      const enforcedPrompt = prompt + "\n\n(SYSTEM INSTRUCTION: You are an institutional crypto analyst. You MUST reply in the EXACT SAME LANGUAGE as the user's prompt. If the user asks in Indonesian, reply in professional Indonesian. If the user asks in English, reply in professional English. Maintain an analytical and sharp tone.)";
+    setResponse("");
 
-      const res = await fetch(`${baseUrl}/api/v1/chat`, {
+    const currentPrompt = prompt;
+    setPrompt("");
+
+    try {
+      // AI Router lokal: TIER 1 (GPT-4o) untuk tanya umum, TIER 2 (FABLE 5 /
+      // Claude) untuk analisa mendalam / eksekusi. Kirim account_id supaya
+      // status PRO ikut terbaca (Trader's Take, dst).
+      const { accountId, email } = await getAccountIdNow();
+      const res = await fetch(`${API_BASE}/api/v1/ai/route`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ prompt: enforcedPrompt }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: currentPrompt, account_id: accountId, user_id: accountId, email }),
       });
 
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
-      // Tangkap apapun format balasan dari backend dengan aman tanpa melabelinya error secara asal
-      const replyText = data.reply || data.response || data.message || data.text;
-      
-      if (typeof replyText === "string") {
-          // Bersihkan prefix "[System Error]" jika terlanjur dikirim oleh backend
-          setResponse(replyText.replace("[System Error]:", "").trim());
-      } else if (data.status === "error") {
-          setResponse(`[AI Core Interruption]: ${data.reply || "Gagal memproses data."}`);
-      } else {
-          setResponse("Visual analysis complete. Market conditions updated."); // Fallback aman
+      let replyText: string | null = null;
+      if (typeof data.reply === "string" && data.reply.trim()) {
+        replyText = data.reply.trim();
+      } else if (data.decision) {
+        replyText = formatFable5Decision(data.decision);
       }
 
+      // Buang blok metadata proposal (@@ORACLE_PROPOSAL@@ {...}) dari tampilan teks.
+      if (replyText) {
+        replyText = replyText.replace(/@@ORACLE_PROPOSAL@@\s*\{[\s\S]*?\}\s*$/m, "").trimEnd();
+      }
+
+      setResponse(replyText ?? "Analisa selesai. Kondisi pasar diperbarui.");
     } catch (error) {
-      console.error("Chat API Error:", error);
-      setResponse("[Connection Error]: Terputus dari ORACLE Neural Net di server Render.");
+      console.error("AI Router Error:", error);
+      setResponse(
+        "[Connection Error]: Gagal terhubung ke ORACLE backend. Pastikan API di " +
+          `${API_BASE} sedang berjalan.`,
+      );
     } finally {
       setIsLoading(false);
-      setPrompt(""); 
     }
   };
 
@@ -215,10 +261,10 @@ export default function DashboardPage() {
             glowColor="group-hover:shadow-[0_0_20px_rgba(99,102,241,0.15)] group-hover:border-indigo-500/50"
             href="/market-intelligence"
           />
-          <StatCard 
-            title="Trade Ledger" 
-            value="2"
-            subtitle="Recent executed positions logged" 
+          <StatCard
+            title="Trade Ledger"
+            value={ledger ? ledger.count.toString() : "…"}
+            subtitle={ledger ? `Paper balance $${ledger.balance.toLocaleString("en-US", { maximumFractionDigits: 0 })} · executed trades` : "Loading ledger…"}
             icon={<BookOpen className="w-5 h-5 text-purple-600 dark:text-purple-500" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] group-hover:border-purple-500/50"
             href="/journal"
@@ -277,10 +323,6 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
-
-            <p className="mt-4 text-xs text-slate-500 dark:text-zinc-500 font-mono transition-colors duration-300">
-              <span className="text-emerald-600 dark:text-emerald-500 font-bold">System:</span> Ready to process natural language queries. Target API: /v1/chat
-            </p>
           </div>
         </div>
 
