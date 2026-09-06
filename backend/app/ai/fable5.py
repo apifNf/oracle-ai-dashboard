@@ -103,21 +103,25 @@ STRICT OUTPUT CONTRACT (enforced server-side):
 
 FABLE5_ANALYSIS_INSTRUCTION = """You are FABLE 5, ORACLE's quant strategist in TERMINAL ANALYSIS mode (not order-execution mode). Use ONLY the injected LIVE METRICS + macro/whale context. No JSON here, no generic-knowledge filler, never invent numbers.
 
-OUTPUT FORMAT (strict — keep the WHOLE reply under ~300 tokens, no preamble):
+OUTPUT FORMAT (strict — keep the WHOLE reply under ~360 tokens, no preamble):
 1. A Markdown table, one row per asset: Aset | Harga | 24J % | RSI(14) | EMA(20/50) | Support | Resistance
 2. A line `**Key Points:**` then EXACTLY 3 bullets:
    - **Momentum:** compare RSI + EMA trend across the assets, one line
    - **Whale/Volume Bias:** from the 24h moves + whale flow, one line ("n/a" if none)
    - **Invalidation:** the level(s) that flip the read, one line
 3. A line `**Bottom Line:**` then ONE neutral sentence naming which asset is technically stronger right now (or "seimbang"/"balanced").
+4. TIER-GATED — read the [TIER] line in the user message:
+   - If [TIER] PRO: add a line `**Trader's Take / Action Plan:**` then 1-3 sentences of sharp, professional, REASONED execution guidance — when/where to enter or wait, order type (limit vs market), the exact invalidation level, and the key risk caveat. Be concrete and directional. Examples: "Wait for a pullback ke area support $79,500 sebelum open LONG; momentum rawan fakeout, hindari market order sekarang." / "Konfirmasi breakout kuat — pertimbangkan scale-in dengan SL ketat di bawah $101.50." Still no leverage numbers or position sizing (that is execution mode).
+   - If [TIER] FREE: DO NOT add a Trader's Take, and give NO buy/sell call, entry/exit plan, or actionable recommendation anywhere. Stop after the neutral Bottom Line. You may add one line: "Actionable Trader's Take tersedia di ORACLE PRO (FABLE 5)."
 
-TRADE PROPOSAL BLOCK — append this when the user asked for a trade setup/ticket/plan, OR the read gives a clear single-asset directional bias with a sensible invalidation level. Make it the VERY LAST line, nothing after it, exact format:
+TRADE PROPOSAL BLOCK — ONLY when [TIER] PRO. Append it when the user asked for a trade setup/ticket/plan, OR the read gives a clear single-asset directional bias with a sensible invalidation level. Make it the VERY LAST line, nothing after it, exact format:
 @@ORACLE_PROPOSAL@@ {"asset":"<TICKER>","side":"BUY"|"SELL","entry":<number>,"sl":<number>,"tp":[<number>,<number>],"risk_rr":[<number>,<number>]}
 - entry = the injected live price of that asset. side = BUY for a bullish read, SELL for bearish.
 - sl = just beyond the nearest structural level (below support for BUY, above resistance for SELL).
 - tp = the next 1-2 levels in the profit direction. risk_rr = |tp-entry| / |entry-sl| for each tp, 2 decimals.
 - Plain numbers only, no currency symbols, no thousands separators. Valid JSON on ONE line.
 - If there is no clean single-asset setup, do NOT append the block.
+- If [TIER] FREE: NEVER append this block under any circumstance.
 
 RULES: bullets only, no paragraphs, no encyclopedia, no "pasti"/"definitely", no targets stated as certainty, no position sizing / leverage / order instructions in the prose, no "Execute Trade" mentions. A coin under synchronization -> one line, skip its row. Reply in the SAME LANGUAGE as the user."""
 
@@ -217,6 +221,7 @@ class Fable5Engine:
         *,
         mode: str = "execution",
         model: str | None = None,
+        pro: bool = False,
         symbol: str | None = None,
         metrics_line: str | None = None,
         macro_context: str | None = None,
@@ -237,7 +242,7 @@ class Fable5Engine:
 
         if mode == "analysis":
             return await self._analyze_prose(
-                client, prompt, metrics_line, macro_context, whale_context, use_model
+                client, prompt, metrics_line, macro_context, whale_context, use_model, pro
             )
 
         user_block = self._build_user_block(
@@ -290,10 +295,19 @@ class Fable5Engine:
         macro_context: str | None,
         whale_context: str | None,
         model: str | None = None,
+        pro: bool = False,
     ) -> str:
         """Mode analisis: Markdown teknikal multi-dimensi, tanpa enforcement JSON."""
+        tier_line = (
+            "[TIER] PRO — include the **Trader's Take / Action Plan:** section."
+            if pro
+            else "[TIER] FREE — neutral read only. NO Trader's Take, NO buy/sell call, "
+            "NO entry/exit strategy."
+        )
         user = "\n".join(
             [
+                tier_line,
+                "",
                 "[LIVE TECHNICAL METRICS — real-time from ORACLE backend]",
                 metrics_ctx or SYNC_SENTINEL,
                 "",
@@ -307,15 +321,14 @@ class Fable5Engine:
                 prompt,
                 "",
                 "Produce the Markdown comparison table first, then the "
-                "multi-dimensional technical read. Neutral tone, real numbers only.",
+                "multi-dimensional technical read. Real numbers only.",
             ]
         )
         try:
-            # Tugas ini terikat format & ringkas — thinking dimatikan supaya
-            # output tetap padat dan murah (Tugas 1).
+            # Terikat format & ringkas — thinking dimatikan supaya output padat & murah.
             response = await client.messages.create(
                 model=model or self._model,
-                max_tokens=600,
+                max_tokens=700,
                 system=FABLE5_ANALYSIS_INSTRUCTION,
                 messages=[{"role": "user", "content": user}],
                 thinking={"type": "disabled"},

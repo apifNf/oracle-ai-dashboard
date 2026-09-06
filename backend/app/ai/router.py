@@ -297,6 +297,7 @@ class AIModelRouter:
                 req.prompt,
                 mode=mode,
                 model=model_override,
+                pro=(user_tier == "pro"),
                 symbol=symbols[0] if symbols else None,
                 metrics_line=metrics_ctx,
                 macro_context=macro_ctx,
