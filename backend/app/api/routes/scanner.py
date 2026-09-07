@@ -14,6 +14,7 @@ import httpx
 import websockets
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException
 
+from app.core.memory import GcPacer
 from app.indicators.engine import IndicatorEngine
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,10 @@ WS_BACKOFF_BASE = 1.5
 WS_BACKOFF_MAX = 60.0
 WS_PING_INTERVAL = 20
 WS_PING_TIMEOUT = 20
+WS_MAX_QUEUE = 96           # batasi antrean frame ticker masuk
+WS_MAX_SIZE = 2 ** 18       # 256 KB per frame (ticker jauh lebih kecil)
+GC_EVERY_TICKS = 6000       # gc.collect() tiap N pesan ticker
+GC_EVERY_SECONDS = 90.0
 
 REDIS_SNAPSHOT_KEY = "oracle:scanner:snapshot"
 REDIS_SNAPSHOT_TTL = 120
@@ -274,12 +279,16 @@ class BinanceStreamManager:
 
     async def _consume(self) -> None:
         url = self._stream_url()
+        pacer = GcPacer(
+            every_seconds=GC_EVERY_SECONDS, every_calls=GC_EVERY_TICKS, tag="scanner-ws"
+        )
         async with websockets.connect(
             url,
             ping_interval=WS_PING_INTERVAL,
             ping_timeout=WS_PING_TIMEOUT,
             close_timeout=10,
-            max_size=2 ** 20,
+            max_size=WS_MAX_SIZE,
+            max_queue=WS_MAX_QUEUE,
         ) as socket:
             self._connected = True
             self._consecutive_failures = 0
@@ -292,6 +301,9 @@ class BinanceStreamManager:
                 except Exception:
                     # Satu pesan rusak tidak boleh menjatuhkan koneksi.
                     logger.debug("Pesan stream gagal diproses.", exc_info=True)
+                finally:
+                    del message
+                    pacer.tick()
 
     def _handle(self, message: str | bytes) -> None:
         envelope = json.loads(message)
@@ -406,6 +418,13 @@ class IndicatorCache:
 
         ok_count = sum(1 for r in results.values() if r.get("status") == "ok")
         logger.info("Indikator diperbarui: %d/%d aset ok.", ok_count, len(results))
+
+        # analyze_many membangun 30 DataFrame pandas 300-baris; reclaim segera
+        # supaya RSS proses tidak melonjak tiap siklus refresh.
+        del payloads
+        import gc
+
+        gc.collect()
         return ok_count
 
     def get(self, pair: str) -> dict[str, Any] | None:
@@ -604,6 +623,7 @@ class ScannerHub:
         }
 
     async def _broadcast_loop(self) -> None:
+        pacer = GcPacer(every_seconds=120.0, every_calls=24, tag="scanner-hub")
         while True:
             try:
                 self._snapshot = self.build_snapshot()
@@ -613,6 +633,7 @@ class ScannerHub:
                 raise
             except Exception:
                 logger.exception("Siklus broadcast gagal.")
+            pacer.tick()
             await asyncio.sleep(BROADCAST_INTERVAL_SECONDS)
 
     async def _cache_snapshot(self) -> None:

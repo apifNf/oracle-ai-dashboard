@@ -49,11 +49,22 @@ class Settings(BaseSettings):
     trade_max_risk_pct: float = 2.0          # risiko maksimum per trade (% equity)
     trade_leverage_cap: int = 3              # leverage maksimum
     trade_max_notional_usdt: float = 20_000.0  # nilai posisi maksimum (sanity ceiling)
-    # LIVE_BINANCE mati secara default. Set TRADE_LIVE_ENABLED=true untuk
+    # LIVE trading mati secara default. Set TRADE_LIVE_ENABLED=true untuk
     # mengizinkan order sungguhan; tetap butuh confirm=true per request.
     trade_live_enabled: bool = False
-    # Saat LIVE aktif, default ke testnet Binance Futures (aman untuk uji coba).
-    binance_testnet: bool = True
+    # Saat LIVE aktif, default ke sandbox/testnet exchange (aman untuk uji coba).
+    exchange_testnet: bool = True
+    binance_testnet: bool = True  # alias lama (dipertahankan utk kompatibilitas)
+
+    # --- Auto-Trade lintas bursa (Workspace Configuration) ------------ #
+    # Bursa & tipe pasar default kalau request tidak menyertakannya.
+    default_exchange_id: str = "binance"       # binance|okx|bybit|mexc|indodax
+    default_market_type: str = "spot"          # spot|futures
+    # Kredensial "Primary Exchange" generik (dipakai untuk exchange apa pun).
+    # Untuk Binance, binance_api_key/secret di atas juga dipakai sebagai fallback.
+    exchange_api_key: str | None = None
+    exchange_api_secret: str | None = None
+    exchange_api_password: str | None = None   # sebagian bursa (OKX) butuh passphrase
     # Lokasi file penyimpanan akun & jurnal trade (persist antar-restart).
     # Produksi: ganti backend ke Supabase/Postgres lewat TradeStore interface.
     trade_store_path: str = "data/trade_store.json"

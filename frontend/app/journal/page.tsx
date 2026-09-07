@@ -397,7 +397,9 @@ export default function JournalPage() {
                     <td className="p-3">
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-zinc-400">
                         {t.mode === "PAPER_TRADING" ? <Beaker className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
-                        {t.mode === "PAPER_TRADING" ? "PAPER" : "LIVE"}
+                        {t.mode === "PAPER_TRADING"
+                          ? "PAPER"
+                          : `LIVE ${(t.exchange_label || t.mode.replace("LIVE_", "")).toUpperCase()}${t.market_type ? " · " + t.market_type.toUpperCase() : ""}`}
                       </span>
                     </td>
                     <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">{money(entryOf(t), 4)}</td>

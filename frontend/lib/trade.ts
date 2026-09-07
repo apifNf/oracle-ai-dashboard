@@ -4,7 +4,10 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 export type TradeSide = "BUY" | "SELL";
-export type TradeMode = "PAPER_TRADING" | "LIVE_BINANCE";
+// "PAPER_TRADING" = simulasi; "LIVE" = order sungguhan ke bursa pilihan user
+// (backend menerjemahkan ke mode "LIVE_<EXCHANGE>", mis. "LIVE_OKX").
+export type TradeMode = "PAPER_TRADING" | "LIVE";
+export type MarketType = "spot" | "futures";
 
 export type ProposalParams = {
   account_id: string;
@@ -44,13 +47,20 @@ export type TradeConfig = {
   leverage_cap: number;
   max_notional_usdt: number;
   live_enabled: boolean;
-  binance_testnet: boolean;
+  exchange_testnet: boolean;
+  binance_testnet?: boolean;
+  default_exchange_id?: string;
+  default_market_type?: string;
+  supported_exchanges?: { id: string; label: string }[];
 };
 
 export type TradeRecord = {
   id: string;
   account_id: string;
-  mode: TradeMode;
+  mode: string; // "PAPER_TRADING" | "LIVE_<EXCHANGE>"
+  exchange_id?: string;
+  exchange_label?: string;
+  market_type?: string;
   symbol: string;
   side: TradeSide;
   status: "OPEN" | "CLOSED" | "DRY_RUN";
@@ -97,7 +107,13 @@ export async function fetchProposal(params: ProposalParams): Promise<TradePropos
 }
 
 export async function executeTrade(
-  params: ProposalParams & { mode: TradeMode; confirm: boolean; dry_run?: boolean },
+  params: ProposalParams & {
+    mode: TradeMode;
+    confirm: boolean;
+    dry_run?: boolean;
+    exchange_id?: string;   // binance|okx|bybit|mexc|indodax (Workspace Config)
+    market_type?: MarketType;
+  },
 ) {
   return post("/api/v1/trade/execute", params);
 }

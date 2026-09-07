@@ -7,10 +7,11 @@ import {
 } from "lucide-react";
 import { createChart, CandlestickSeries, ColorType } from "lightweight-charts";
 import { useTheme } from "next-themes";
-import { useAuth } from "@/components/auth/auth-provider";
 import { cn } from "@/lib/utils";
 import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
 import { proposalParamsFromSignal } from "@/lib/trade";
+import { useAccountId, fetchBillingStatus, type BillingStatus } from "@/lib/billing";
+import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
 
 /* ================================================================== */
 /* Tipe — cocok persis dengan payload ScannerHub.build_snapshot()      */
@@ -414,8 +415,11 @@ function DetailChart({ coin, isDark }: { coin: string; isDark: boolean }) {
 
 export default function ScannerPage() {
   const { resolvedTheme } = useTheme();
-  const { tier, user } = useAuth();
-  const accountId = user?.email || "default";
+  const { accountId, email, ready } = useAccountId();
+
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const tier: "free" | "pro" = billing?.tier ?? "free";
 
   const [mounted, setMounted] = useState(false);
   const [proposeFor, setProposeFor] = useState<string | null>(null);
@@ -432,6 +436,15 @@ export default function ScannerPage() {
 
   useEffect(() => setMounted(true), []);
   const isDark = mounted ? resolvedTheme === "dark" : true;
+
+  // Tier user (untuk membuka kunci kartu Pro secara nyata).
+  useEffect(() => {
+    if (!ready) return;
+    const load = () => fetchBillingStatus(accountId).then((s) => s && setBilling(s));
+    load();
+    const t = setInterval(load, 15_000);
+    return () => clearInterval(t);
+  }, [accountId, ready]);
 
   /* ---------------- WebSocket dengan auto-reconnect ---------------- */
 
@@ -777,7 +790,22 @@ export default function ScannerPage() {
                 </div>
 
                 {isLocked && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/20 dark:bg-black/40 hover:bg-emerald-500/5 transition-all duration-500 cursor-pointer">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setUpgradeOpen(true);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setUpgradeOpen(true);
+                      }
+                    }}
+                    className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl border border-transparent bg-white/20 dark:bg-black/40 cursor-pointer transition-all duration-300 hover:bg-white/5 hover:border-green-500/50 hover:shadow-[0_0_24px_rgba(16,185,129,0.12)]"
+                  >
                     <div className="p-3 bg-white dark:bg-[#0A0A0A] rounded-full shadow-xl mb-3 border border-slate-200 dark:border-white/10 group-hover:border-emerald-500/40 transition-colors duration-500">
                       <Lock className="w-5 h-5 text-slate-400 dark:text-zinc-500 group-hover:text-emerald-500 transition-colors duration-500" />
                     </div>
@@ -785,7 +813,7 @@ export default function ScannerPage() {
                       Pro Alpha Signal
                     </span>
                     <span className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">
-                      Upgrade to unlock
+                      Klik untuk upgrade — buka kunci
                     </span>
                   </div>
                 )}
@@ -794,6 +822,13 @@ export default function ScannerPage() {
           })}
         </div>
       )}
+
+      <UpgradeToProModal
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        accountId={accountId}
+        email={email}
+      />
     </div>
   );
 }

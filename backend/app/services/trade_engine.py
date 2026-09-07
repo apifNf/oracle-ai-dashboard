@@ -18,6 +18,7 @@ Semua angka dolar dalam USDT.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Literal
 
@@ -339,16 +340,35 @@ class TradeEngine:
         proposal: dict[str, Any],
         account: dict[str, Any],
         *,
+        exchange_id: str = "binance",
+        market_type: str = "spot",
         api_key: str | None,
         api_secret: str | None,
+        api_password: str | None = None,
         dry_run: bool = True,
     ) -> dict[str, Any]:
+        from app.api.execute_trade import (
+            EXCHANGE_LABELS,
+            ExchangeAdapterError,
+            build_ccxt_exchange,
+            place_order,
+            to_ccxt_symbol,
+            validate_route,
+        )
+
+        exchange_id = (exchange_id or settings.default_exchange_id).strip().lower()
+        market_type = (market_type or settings.default_market_type).strip().lower()
+        try:
+            exchange_id, market_type = validate_route(exchange_id, market_type)
+        except ExchangeAdapterError as exc:
+            raise TradeError(str(exc)) from exc
+        label = EXCHANGE_LABELS.get(exchange_id, exchange_id.upper())
+
         if not settings.trade_live_enabled:
             raise LiveTradingDisabled(
-                "LIVE_BINANCE dinonaktifkan. Set TRADE_LIVE_ENABLED=true untuk mengaktifkan."
+                f"LIVE trading ({label}) dinonaktifkan. Set TRADE_LIVE_ENABLED=true "
+                "untuk mengaktifkan; setiap order tetap butuh confirm=true."
             )
-        if not api_key or not api_secret:
-            raise TradeError("BINANCE_API_KEY / BINANCE_API_SECRET belum di-set.")
 
         # Guardrail sudah diterapkan di build_proposal; ini pertahanan lapis dua.
         if proposal["applied_leverage"] > settings.trade_leverage_cap:
@@ -356,10 +376,17 @@ class TradeEngine:
         if proposal["notional_usdt"] > settings.trade_max_notional_usdt * 1.001:
             raise TradeError("Notional melebihi cap.")
 
+        testnet = bool(settings.exchange_testnet or settings.binance_testnet)
+        ccxt_symbol = to_ccxt_symbol(proposal["symbol"], market_type)
+
         base = {
             "account_id": account["account_id"],
-            "mode": "LIVE_BINANCE",
+            "mode": f"LIVE_{exchange_id.upper()}",
+            "exchange_id": exchange_id,
+            "exchange_label": label,
+            "market_type": market_type,
             "symbol": proposal["symbol"],
+            "ccxt_symbol": ccxt_symbol,
             "side": proposal["side"],
             "order_type": proposal["order_type"],
             "entry_price": proposal["entry_price"],
@@ -372,7 +399,7 @@ class TradeEngine:
             "applied_risk_pct": proposal["applied_risk_pct"],
             "risk_reward_ratio": proposal["risk_reward_ratio"],
             "guardrail_caps": proposal["guardrail_caps"],
-            "testnet": settings.binance_testnet,
+            "testnet": testnet,
         }
 
         if dry_run:
@@ -381,45 +408,43 @@ class TradeEngine:
                 "status": "DRY_RUN",
                 "filled_price": None,
                 "exchange_ref": None,
-                "note": "dry_run=true — order tidak dikirim ke Binance.",
+                "note": f"dry_run=true — order TIDAK dikirim ke {label} ({market_type}).",
             }
 
+        if not api_key or not api_secret:
+            raise TradeError(
+                f"Kredensial API {label} belum di-set (EXCHANGE_API_KEY / "
+                f"EXCHANGE_API_SECRET, atau BINANCE_API_KEY untuk Binance)."
+            )
+
         try:
-            import ccxt  # type: ignore
-        except Exception as exc:  # pragma: no cover
-            raise TradeError(f"ccxt tidak tersedia: {exc}") from exc
+            exchange = build_ccxt_exchange(
+                exchange_id,
+                market_type,
+                api_key=api_key,
+                api_secret=api_secret,
+                api_password=api_password,
+                testnet=testnet,
+            )
+            result = await asyncio.to_thread(
+                place_order,
+                exchange,
+                symbol=ccxt_symbol,
+                side=proposal["side"],
+                order_type=proposal["order_type"],
+                amount=proposal["position_size_coin"],
+                price=proposal["entry_price"],
+                leverage=proposal["applied_leverage"],
+                market_type=market_type,
+            )
+        except ExchangeAdapterError as exc:
+            raise TradeError(str(exc)) from exc
 
-        client = ccxt.binanceusdm(
-            {
-                "apiKey": api_key,
-                "secret": api_secret,
-                "enableRateLimit": True,
-                "options": {"defaultType": "future"},
-            }
-        )
-        if settings.binance_testnet:
-            client.set_sandbox_mode(True)
-
-        ccxt_symbol = proposal["symbol"].replace("USDT", "/USDT")
-        try:
-            client.set_leverage(proposal["applied_leverage"], ccxt_symbol)
-        except Exception:
-            logger.warning("set_leverage gagal (lanjut).", exc_info=True)
-
-        params: dict[str, Any] = {}
-        order = client.create_order(
-            symbol=ccxt_symbol,
-            type=proposal["order_type"].lower(),
-            side=proposal["side"].lower(),
-            amount=proposal["position_size_coin"],
-            price=proposal["entry_price"] if proposal["order_type"] == "LIMIT" else None,
-            params=params,
-        )
         return {
             **base,
             "status": "OPEN",
-            "filled_price": order.get("average") or order.get("price") or proposal["entry_price"],
-            "exchange_ref": order.get("id"),
+            "filled_price": result.get("filled_price") or proposal["entry_price"],
+            "exchange_ref": result.get("id"),
         }
 
 

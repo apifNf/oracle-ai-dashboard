@@ -31,8 +31,11 @@ from typing import Any, Iterable
 
 __all__ = ["MarketIntelStore"]
 
-NEWS_CAPACITY = 120
+# Ring buffer ketat — hanya menyimpan N data terbaru di RAM (anti-OOM Render).
+NEWS_CAPACITY = 80
 ONCHAIN_CAPACITY = 60
+# Set dedupe dipangkas begitu tumbuh melebihi kelipatan ini terhadap maxlen.
+_SEEN_MULTIPLIER = 2
 
 
 class MarketIntelStore:
@@ -112,7 +115,7 @@ class MarketIntelStore:
         *key_fields: str,
     ) -> None:
         """Jaga set dedupe tidak tumbuh tak terbatas saat buffer sudah rotasi."""
-        if len(seen) <= buffer.maxlen * 4:  # type: ignore[operator]
+        if len(seen) <= (buffer.maxlen or 100) * _SEEN_MULTIPLIER:
             return
         live: set[str] = set()
         for row in buffer:

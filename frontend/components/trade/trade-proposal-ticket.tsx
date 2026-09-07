@@ -10,6 +10,7 @@ import {
   type ProposalParams, type TradeProposal, type TradeConfig, type TradeMode,
   fetchProposal, fetchTradeConfig, executeTrade,
 } from "@/lib/trade";
+import { useWorkspace, exchangeLabel } from "@/lib/workspace";
 
 type Props = {
   params: ProposalParams;
@@ -29,6 +30,9 @@ const fmtPrice = (v: number | null | undefined) => {
 };
 
 export function TradeProposalTicket({ params, onExecuted }: Props) {
+  const ws = useWorkspace(); // Primary Exchange + Trading Environment dari Settings
+  const exLabel = exchangeLabel(ws.exchange);
+
   const [proposal, setProposal] = useState<TradeProposal | null>(null);
   const [config, setConfig] = useState<TradeConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,7 +65,14 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
     setExecuting(true);
     setExecError(null);
     try {
-      const res = await executeTrade({ ...params, mode, confirm: true, dry_run: true });
+      const res = await executeTrade({
+        ...params,
+        mode,
+        confirm: true,
+        dry_run: true, // UI selalu dry-run untuk LIVE; order nyata dikirim eksplisit lewat backend
+        exchange_id: ws.exchange,
+        market_type: ws.environment,
+      });
       setResult({ ...res, _mode: mode });
       onExecuted?.(res);
     } catch (e) {
@@ -101,8 +112,8 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
           {result._mode === "PAPER_TRADING"
             ? "Paper trade dieksekusi"
             : dry
-            ? "LIVE dry-run OK (order TIDAK dikirim)"
-            : "Order LIVE terkirim"}
+            ? `LIVE dry-run ${exLabel} OK — order TIDAK dikirim`
+            : `Order LIVE ${exLabel} terkirim`}
         </div>
         <p className="text-xs font-mono text-emerald-700/80 dark:text-emerald-300/70">
           {t.symbol} {t.side} · {t.position_size_coin} coin · margin ${fmt(t.allocated_margin_usdt)} ·
@@ -189,13 +200,16 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
           <Beaker className="w-4 h-4" /> Execute Paper Trade
         </button>
         <button
-          onClick={() => setConfirmMode("LIVE_BINANCE")}
+          onClick={() => setConfirmMode("LIVE")}
           disabled={executing || !liveEnabled}
           title={liveEnabled ? undefined : "LIVE dinonaktifkan (TRADE_LIVE_ENABLED=false)"}
           className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-amber-400 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <Zap className="w-4 h-4" /> Execute Binance
-          {config?.binance_testnet && liveEnabled ? " (testnet)" : ""}
+          <Zap className="w-4 h-4" /> Execute {exLabel}
+          <span className="text-[10px] font-normal opacity-70">
+            {ws.environment === "futures" ? "· Futures" : "· Spot"}
+            {config?.exchange_testnet && liveEnabled ? " · testnet" : ""}
+          </span>
         </button>
       </div>
 
@@ -214,7 +228,7 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
                 ) : (
                   <Zap className="w-4 h-4 text-amber-500" />
                 )}
-                Konfirmasi {confirmMode === "PAPER_TRADING" ? "Paper Trade" : "LIVE Binance"}
+                Konfirmasi {confirmMode === "PAPER_TRADING" ? "Paper Trade" : `LIVE ${exLabel} (${ws.environment === "futures" ? "Futures" : "Spot"})`}
               </span>
               <button onClick={() => setConfirmMode(null)} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">
                 <X className="w-4 h-4" />
@@ -233,10 +247,11 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
                 Est. margin ${fmt(proposal.estimated_margin_usdt)} · risk {proposal.applied_risk_pct}% · R/R{" "}
                 {proposal.primary_rr ?? "—"}
               </p>
-              {confirmMode === "LIVE_BINANCE" && (
+              {confirmMode === "LIVE" && (
                 <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2">
-                  LIVE dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi tanpa order nyata).
-                  Aktifkan order sungguhan hanya lewat backend yang dikonfigurasi.
+                  Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
+                  Dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi CCXT tanpa order nyata).
+                  Order sungguhan hanya jika backend TRADE_LIVE_ENABLED=true.
                 </p>
               )}
             </div>

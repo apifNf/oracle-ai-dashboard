@@ -90,11 +90,6 @@ export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: 
         <div className="flex items-baseline gap-2">
           <span className="text-3xl font-bold text-white">${price}</span>
           <span className="text-sm text-zinc-500">/ bulan · {config?.period_days ?? 30} hari</span>
-          {config?.mock_mode && (
-            <span className="ml-auto text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              Sandbox
-            </span>
-          )}
         </div>
 
         <ul className="space-y-2">

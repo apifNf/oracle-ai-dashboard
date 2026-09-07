@@ -140,6 +140,12 @@ async def lifespan(app: FastAPI):
 
     app.state.trade_engine = await _safe_start("trade_engine", _start_trade_engine)
 
+    # Semua worker & route sudah ter-mount: keluarkan objek startup dari GC
+    # supaya collect() berikutnya lebih murah (anti-OOM Render).
+    from app.core.memory import freeze_after_startup
+
+    freeze_after_startup()
+
     try:
         yield
     finally:

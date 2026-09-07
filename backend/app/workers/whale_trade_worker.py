@@ -24,6 +24,7 @@ from typing import Any
 import websockets
 
 from app.core.config import settings
+from app.core.memory import GcPacer
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,12 @@ PAIRS = (
 
 WS_PING_INTERVAL = 20
 WS_PING_TIMEOUT = 20
+WS_MAX_QUEUE = 64          # batasi antrean frame masuk (anti buffer menumpuk)
+WS_MAX_SIZE = 2 ** 18      # 256 KB per frame; aggTrade jauh lebih kecil
 BACKOFF_BASE = 1.6
 BACKOFF_MAX = 45.0
+GC_EVERY_MESSAGES = 4000   # paksa gc.collect() tiap N aggTrade diproses
+GC_EVERY_SECONDS = 90.0
 
 
 class WhaleTradeWorker:
@@ -93,12 +98,16 @@ class WhaleTradeWorker:
             await asyncio.sleep(delay)
 
     async def _consume(self) -> None:
+        pacer = GcPacer(
+            every_seconds=GC_EVERY_SECONDS, every_calls=GC_EVERY_MESSAGES, tag="whale-ws"
+        )
         async with websockets.connect(
             self._url(),
             ping_interval=WS_PING_INTERVAL,
             ping_timeout=WS_PING_TIMEOUT,
             close_timeout=10,
-            max_size=2 ** 20,
+            max_size=WS_MAX_SIZE,
+            max_queue=WS_MAX_QUEUE,
         ) as socket:
             self._failures = 0
             logger.info("Whale-trade stream tersambung (%d aliran).", len(PAIRS))
@@ -107,6 +116,10 @@ class WhaleTradeWorker:
                     self._handle(message)
                 except Exception:
                     logger.debug("Pesan aggTrade gagal diproses.", exc_info=True)
+                finally:
+                    # Lepas referensi frame sebelum iterasi berikutnya.
+                    del message
+                    pacer.tick()
 
     def _handle(self, message: str | bytes) -> None:
         envelope = json.loads(message)

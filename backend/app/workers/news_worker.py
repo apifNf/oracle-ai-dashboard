@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.memory import GcPacer
 from app.workers.rss_worker import DEFAULT_FEEDS, FeedSource
 
 try:
@@ -97,6 +98,7 @@ class NewsWorker:
             self._client = None
 
     async def _loop(self) -> None:
+        pacer = GcPacer(every_seconds=180.0, every_calls=3, tag="news")
         while True:
             try:
                 n = await self.poll_once()
@@ -105,6 +107,7 @@ class NewsWorker:
                 raise
             except Exception:
                 logger.exception("Siklus berita gagal; coba lagi siklus berikutnya.")
+            pacer.tick()  # feedparser meninggalkan objek besar per siklus
             await asyncio.sleep(self._interval)
 
     async def poll_once(self) -> int:
@@ -234,7 +237,10 @@ class NewsWorker:
                     "impact": _classify(title),
                 }
             )
-        return self._store.add_news_many(items)
+        added = self._store.add_news_many(items)
+        # feedparser mengembalikan struktur besar; lepas segera.
+        del parsed
+        return added
 
 
 def _entry_date(entry: Any) -> str:

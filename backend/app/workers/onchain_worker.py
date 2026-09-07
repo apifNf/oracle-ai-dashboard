@@ -31,6 +31,8 @@ from typing import Any
 
 import httpx
 
+from app.core.memory import GcPacer
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["OnChainWorker"]
@@ -114,6 +116,7 @@ class OnChainWorker:
             self._client = None
 
     async def _loop(self) -> None:
+        pacer = GcPacer(every_seconds=120.0, every_calls=8, tag="onchain")
         try:
             await self.poll_once()
         except Exception:
@@ -126,6 +129,8 @@ class OnChainWorker:
                 raise
             except Exception:
                 logger.exception("Siklus on-chain gagal; lanjut siklus berikutnya.")
+            finally:
+                pacer.tick()  # bersihkan list rows / respons JSON RPC per siklus
 
     # ---------------------- inti ---------------------------------- #
 

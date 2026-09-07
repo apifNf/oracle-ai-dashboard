@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Save, Key, Wallet, Shield, Check } from "lucide-react";
+import { WORKSPACE_EVENT } from "@/lib/workspace";
 
 export default function SettingsPage() {
   // 1. Membuat "Ingatan" (State) untuk menyimpan pilihan
@@ -30,6 +31,9 @@ export default function SettingsPage() {
     localStorage.setItem("oracle_environment", environment);
     localStorage.setItem("oracle_openai_key", openAiKey);
     localStorage.setItem("oracle_exchange_key", exchangeKey);
+
+    // Beri tahu komponen lain (Trade Ticket, dst.) supaya ikut menyesuaikan.
+    window.dispatchEvent(new Event(WORKSPACE_EVENT));
 
     // Memberikan efek visual bahwa data berhasil disimpan
     setIsSaved(true);

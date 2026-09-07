@@ -48,9 +48,13 @@ class ProposeRequest(BaseModel):
 
 
 class ExecuteRequest(ProposeRequest):
-    mode: Literal["PAPER_TRADING", "LIVE_BINANCE"] = "PAPER_TRADING"
+    # "PAPER_TRADING" = simulasi; apa pun selain itu = LIVE (mis. "LIVE",
+    # "LIVE_OKX"). Bursa & tipe pasar ditentukan Workspace Configuration user.
+    mode: str = "PAPER_TRADING"
     confirm: bool = False
-    dry_run: bool = True                       # hanya relevan untuk LIVE_BINANCE
+    dry_run: bool = True                       # hanya relevan untuk LIVE
+    exchange_id: str | None = None             # binance|okx|bybit|mexc|indodax
+    market_type: Literal["spot", "futures"] | None = None
 
 
 class CloseRequest(BaseModel):
@@ -119,6 +123,8 @@ async def _build(request: Request, body: ProposeRequest) -> dict[str, Any]:
 
 @router.get("/config")
 async def trade_config() -> dict[str, Any]:
+    from app.api.execute_trade import EXCHANGE_LABELS
+
     return {
         "status": "ok",
         "paper_start_balance_usdt": settings.paper_start_balance_usdt,
@@ -126,7 +132,13 @@ async def trade_config() -> dict[str, Any]:
         "leverage_cap": settings.trade_leverage_cap,
         "max_notional_usdt": settings.trade_max_notional_usdt,
         "live_enabled": settings.trade_live_enabled,
-        "binance_testnet": settings.binance_testnet,
+        "exchange_testnet": bool(settings.exchange_testnet or settings.binance_testnet),
+        "binance_testnet": settings.binance_testnet,  # alias lama
+        "default_exchange_id": settings.default_exchange_id,
+        "default_market_type": settings.default_market_type,
+        "supported_exchanges": [
+            {"id": k, "label": v} for k, v in EXCHANGE_LABELS.items()
+        ],
     }
 
 
@@ -192,13 +204,20 @@ async def trade_execute(body: ExecuteRequest, request: Request) -> dict[str, Any
         summary = await asyncio.to_thread(store.account_summary, body.account_id)
         return {"status": "ok", "mode": "PAPER_TRADING", "trade": record, "account": summary, "proposal": proposal}
 
-    # ---- LIVE_BINANCE ---- #
+    # ---- LIVE (bursa dinamis dari Workspace Configuration) ---- #
+    exchange_id = (body.exchange_id or settings.default_exchange_id).strip().lower()
+    market_type = (body.market_type or settings.default_market_type).strip().lower()
+    api_key, api_secret, api_password = _resolve_exchange_keys(exchange_id)
+
     try:
         trade = await engine.execute_live(
             proposal,
             account,
-            api_key=settings.binance_api_key,
-            api_secret=settings.binance_api_secret,
+            exchange_id=exchange_id,
+            market_type=market_type,
+            api_key=api_key,
+            api_secret=api_secret,
+            api_password=api_password,
             dry_run=body.dry_run,
         )
     except LiveTradingDisabled as exc:
@@ -211,7 +230,19 @@ async def trade_execute(body: ExecuteRequest, request: Request) -> dict[str, Any
     record = trade
     if trade.get("status") in ("OPEN", "DRY_RUN"):
         record = await asyncio.to_thread(store.add_trade, trade)
-    return {"status": "ok", "mode": "LIVE_BINANCE", "trade": record, "proposal": proposal}
+    return {"status": "ok", "mode": trade.get("mode", "LIVE"), "trade": record, "proposal": proposal}
+
+
+def _resolve_exchange_keys(exchange_id: str) -> tuple[str | None, str | None, str | None]:
+    """
+    Kredensial "Primary Exchange": EXCHANGE_API_KEY/SECRET generik untuk bursa
+    apa pun; khusus Binance, BINANCE_API_KEY/SECRET dipakai sebagai fallback.
+    """
+    if settings.exchange_api_key and settings.exchange_api_secret:
+        return settings.exchange_api_key, settings.exchange_api_secret, settings.exchange_api_password
+    if exchange_id == "binance":
+        return settings.binance_api_key, settings.binance_api_secret, None
+    return None, None, None
 
 
 @router.post("/close")
