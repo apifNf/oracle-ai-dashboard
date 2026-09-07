@@ -12,17 +12,24 @@ class AIRequest(BaseModel):
 def get_crypto_price(symbol: str) -> dict:
     """
     Fungsi mata-mata yang sudah di-upgrade dengan sistem Diagnostik.
-    Menggunakan jalur API resmi Binance Data (bebas blokir).
+    Sumber: Bybit v5 (spot). Binance memblokir IP AS (HTTP 451) di Render.
     """
     try:
-        url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol.upper()}USDT"
+        url = (
+            "https://api.bybit.com/v5/market/tickers"
+            f"?category=spot&symbol={symbol.upper()}USDT"
+        )
         response = requests.get(url, timeout=5)
-        
+
         if response.status_code == 200:
-            data = response.json()
+            body = response.json()
+            rows = (body.get("result") or {}).get("list") or []
+            if not rows:
+                return {"status": "failed", "text": "", "debug": "Simbol tidak ada di Bybit"}
+            price = float(rows[0]["lastPrice"])
             return {
-                "status": "success", 
-                "text": f"Harga {symbol.upper()} saat ini: ${float(data['price']):.5f} USDT",
+                "status": "success",
+                "text": f"Harga {symbol.upper()} saat ini: ${price:.5f} USDT",
                 "debug": "Sukses (200 OK)"
             }
         else:

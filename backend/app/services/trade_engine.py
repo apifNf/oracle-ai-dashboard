@@ -77,7 +77,7 @@ class TradeEngine:
         IndicatorEngine klines.
         """
         pair = self._normalize_pair(symbol)            # "SOL/USDT"
-        binance_symbol = pair.replace("/", "")         # "SOLUSDT"
+        exchange_symbol = pair.replace("/", "")        # "SOLUSDT"
 
         if self._scanner_hub is not None:
             try:
@@ -87,7 +87,7 @@ class TradeEngine:
             except Exception:
                 pass
 
-        price = await self._binance_ticker_price(binance_symbol)
+        price = await self._bybit_ticker_price(exchange_symbol)
         if price is not None:
             return price
 
@@ -110,27 +110,32 @@ class TradeEngine:
             )
         return self._http
 
-    async def _binance_ticker_price(self, binance_symbol: str) -> float | None:
-        """GET /api/v3/ticker/price — harga pasar terkini, tanpa API key."""
+    async def _bybit_ticker_price(self, exchange_symbol: str) -> float | None:
+        """
+        Bybit v5 /market/tickers — harga pasar terkini, tanpa API key.
+        Binance memblokir IP AS (HTTP 451) di Render; Bybit tidak geoblock.
+        """
         http = self._get_http()
-        for base in ("https://api.binance.com", "https://data-api.binance.vision"):
-            try:
-                resp = await http.get(
-                    f"{base}/api/v3/ticker/price", params={"symbol": binance_symbol}
-                )
-                if resp.status_code != 200:
-                    continue
-                price = float(resp.json().get("price", 0) or 0)
+        try:
+            resp = await http.get(
+                "https://api.bybit.com/v5/market/tickers",
+                params={"category": "spot", "symbol": exchange_symbol},
+            )
+            if resp.status_code != 200:
+                return None
+            rows = (resp.json().get("result") or {}).get("list") or []
+            if rows:
+                price = float(rows[0].get("lastPrice", 0) or 0)
                 if price > 0:
                     return price
-            except Exception:
-                continue
+        except Exception:
+            return None
         return None
 
     async def reference_prices(self, symbols: list[str]) -> dict[str, float]:
         """
         Harga live batch untuk beberapa aset sekaligus (dipakai polling floating
-        PnL di Journal). Kunci hasil = simbol Binance ('BTCUSDT').
+        PnL di Journal). Kunci hasil = simbol bursa ('BTCUSDT').
         """
         norm: dict[str, str] = {}
         for s in symbols:
@@ -150,26 +155,27 @@ class TradeEngine:
                 except Exception:
                     pass
 
-        # 2. batch Binance untuk sisanya
+        # 2. batch Bybit untuk sisanya. Bybit tidak punya param multi-simbol,
+        #    jadi ambil seluruh daftar spot sekali lalu saring yang dibutuhkan.
         missing = [b for b in norm if b not in out]
         if missing:
-            import json as _json
-
             http = self._get_http()
-            params = {"symbols": _json.dumps(missing, separators=(",", ":"))}
-            for base in ("https://api.binance.com", "https://data-api.binance.vision"):
-                try:
-                    resp = await http.get(f"{base}/api/v3/ticker/price", params=params)
-                    if resp.status_code != 200:
-                        continue
-                    rows = resp.json()
+            wanted = set(missing)
+            try:
+                resp = await http.get(
+                    "https://api.bybit.com/v5/market/tickers",
+                    params={"category": "spot"},
+                )
+                if resp.status_code == 200:
+                    rows = (resp.json().get("result") or {}).get("list") or []
                     for row in rows if isinstance(rows, list) else []:
-                        price = float(row.get("price", 0) or 0)
-                        if price > 0:
-                            out[str(row.get("symbol"))] = price
-                    break
-                except Exception:
-                    continue
+                        sym = str(row.get("symbol", ""))
+                        if sym in wanted:
+                            price = float(row.get("lastPrice", 0) or 0)
+                            if price > 0:
+                                out[sym] = price
+            except Exception:
+                pass
 
         # 3. fallback per-simbol untuk yang masih kosong
         for bsym in [b for b in norm if b not in out]:

@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["OnChainWorker"]
 
-BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
+# Binance memblokir IP AS (HTTP 451) di Render — harga ETH diambil dari Bybit v5.
+BYBIT_TICKERS_URL = "https://api.bybit.com/v5/market/tickers"
 REQUEST_TIMEOUT = 15.0
 MAX_BLOCKS_PER_CYCLE = 5          # jangan mengejar terlalu jauh sekaligus
 MAX_TX_SCANNED_PER_BLOCK = 400
@@ -311,10 +312,11 @@ class OnChainWorker:
         assert self._client is not None
         try:
             response = await self._client.get(
-                BINANCE_PRICE_URL, params={"symbol": "ETHUSDT"}
+                BYBIT_TICKERS_URL, params={"category": "spot", "symbol": "ETHUSDT"}
             )
             response.raise_for_status()
-            price = float(response.json()["price"])
+            rows = (response.json().get("result") or {}).get("list") or []
+            price = float(rows[0]["lastPrice"]) if rows else 0.0
         except Exception as exc:
             logger.warning("Harga ETHUSDT gagal diambil: %s", type(exc).__name__)
             return self._eth_price  # pakai harga lama kalau ada

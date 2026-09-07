@@ -34,6 +34,13 @@ _INTERVAL_SECONDS = {
     "1h": 3600, "4h": 14400, "1d": 86400,
 }
 
+# Binance memblokir IP AS (HTTP 451). Sumber utama klines dipindah ke Bybit v5,
+# yang tidak geoblock. Interval Bybit: menit sebagai angka, D/W/M untuk hari+.
+_BYBIT_INTERVAL = {
+    "1m": "1", "5m": "5", "15m": "15", "30m": "30",
+    "1h": "60", "4h": "240", "1d": "D",
+}
+
 
 class IndicatorStatus(str, Enum):
     OK = "ok"
@@ -99,7 +106,7 @@ class IndicatorEngine:
         errors: list[str] = []
 
         for source, fetcher in (
-            ("binance", self._fetch_binance),
+            ("bybit", self._fetch_bybit),
             ("gateio", self._fetch_gateio),
         ):
             try:
@@ -123,7 +130,7 @@ class IndicatorEngine:
                 continue
 
             if source == "gateio":
-                logger.info("Fallback: %s diambil dari Gate.io, bukan Binance.", symbol)
+                logger.info("Fallback: %s diambil dari Gate.io, bukan Bybit.", symbol)
 
             return {
                 "status": IndicatorStatus.OK,
@@ -139,24 +146,32 @@ class IndicatorEngine:
             "error": {"code": "all_sources_failed", "message": "; ".join(errors)},
         }
 
-    async def _fetch_binance(self, symbol: str, interval: str) -> pd.DataFrame | None:
+    async def _fetch_bybit(self, symbol: str, interval: str) -> pd.DataFrame | None:
+        bybit_interval = _BYBIT_INTERVAL.get(interval)
+        if bybit_interval is None:
+            return None
+
         client = await self._get_client()
         response = await client.get(
-            "https://api.binance.com/api/v3/klines",
+            "https://api.bybit.com/v5/market/kline",
             params={
-                "symbol": self._binance_symbol(symbol),
-                "interval": interval,
-                "limit": FETCH_LIMIT,
+                "category": "spot",
+                "symbol": self._binance_symbol(symbol),  # format identik: BTCUSDT
+                "interval": bybit_interval,
+                "limit": min(FETCH_LIMIT, 1000),          # batas keras Bybit
             },
         )
         if response.status_code == 400:
-            return None  # simbol tidak ada di Binance
+            return None  # simbol tidak ada di Bybit
         response.raise_for_status()
-        rows = response.json()
+        body = response.json()
+        rows = ((body.get("result") or {}).get("list")) or []
         if not isinstance(rows, list) or not rows:
             return None
 
-        # index: 0 open_time, 1 open, 2 high, 3 low, 4 close, 5 volume, 6 close_time
+        # Bybit mengurutkan TERBARU DULU -> balik jadi kronologis untuk indikator.
+        rows = list(reversed(rows))
+        # index: 0 start(ms), 1 open, 2 high, 3 low, 4 close, 5 volume, 6 turnover
         return pd.DataFrame(
             [
                 [int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])]

@@ -129,7 +129,8 @@ def _decorate_onchain(r: dict[str, Any]) -> dict[str, Any]:
 
     if item.get("event_type") == "EXCHANGE_TRADE":
         side = item.get("side") or "TRADE"
-        item["ticker_line"] = f"{prefix}{amt} {asset} ({usd}) {side} order filled on Binance"
+        venue = item.get("to_address") or "Exchange"
+        item["ticker_line"] = f"{prefix}{amt} {asset} ({usd}) {side} order filled on {venue}"
         px = item.get("price")
         item["ticker_sub"] = (
             f"↳ Trade #{item.get('trade_ref', '?')}"

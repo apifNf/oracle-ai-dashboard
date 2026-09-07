@@ -3,9 +3,14 @@ backend/app/workers/whale_trade_worker.py
 
 ORACLE :: WhaleTradeWorker
 
-Aliran on-chain / eksekusi real-time dari WebSocket publik Binance
-(`<symbol>@aggTrade`). Setiap agg-trade dengan notional >= WHALE_THRESHOLD_USD
+Aliran on-chain / eksekusi real-time dari WebSocket publik Bybit v5
+(`publicTrade.<SYMBOL>` pada pasar linear perpetual — di situlah likuiditas
+whale terkonsentrasi). Setiap trade dengan notional >= WHALE_THRESHOLD_USD
 didorong ke MarketIntelStore sebagai event "whale execution".
+
+Sumber dipindah dari Binance karena Binance memblokir IP AS (HTTP 451) dan
+server Render berlokasi di AS. Bybit tidak geoblock AS. Bentuk event yang
+dikirim ke frontend TIDAK berubah.
 
 100% real-time, tanpa API key, tanpa dummy. Pelengkap OnChainWorker
 (transfer ETH/ERC-20 on-chain sungguhan lewat JSON-RPC).
@@ -30,12 +35,14 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["WhaleTradeWorker"]
 
-BINANCE_WS = "wss://stream.binance.com:9443/stream"
+BYBIT_WS = "wss://stream.bybit.com/v5/public/linear"
+WS_SUBSCRIBE_CHUNK = 10    # batas arg per pesan subscribe Bybit
 
 # Pasangan likuid utama — cukup untuk aliran whale yang konsisten.
+# Format simbol Bybit linear (huruf besar, tanpa pemisah): BTCUSDT.
 PAIRS = (
-    "btcusdt", "ethusdt", "solusdt", "bnbusdt", "xrpusdt", "dogeusdt",
-    "adausdt", "avaxusdt", "linkusdt", "ltcusdt", "trxusdt", "suiusdt",
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT",
+    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "TRXUSDT", "SUIUSDT",
 )
 
 WS_PING_INTERVAL = 20
@@ -76,10 +83,6 @@ class WhaleTradeWorker:
                 await self._task
             self._task = None
 
-    def _url(self) -> str:
-        streams = "/".join(f"{p}@aggTrade" for p in PAIRS)
-        return f"{BINANCE_WS}?streams={streams}"
-
     async def _run(self) -> None:
         while True:
             try:
@@ -102,20 +105,25 @@ class WhaleTradeWorker:
             every_seconds=GC_EVERY_SECONDS, every_calls=GC_EVERY_MESSAGES, tag="whale-ws"
         )
         async with websockets.connect(
-            self._url(),
+            BYBIT_WS,
             ping_interval=WS_PING_INTERVAL,
             ping_timeout=WS_PING_TIMEOUT,
             close_timeout=10,
             max_size=WS_MAX_SIZE,
             max_queue=WS_MAX_QUEUE,
         ) as socket:
+            args = [f"publicTrade.{p}" for p in PAIRS]
+            for i in range(0, len(args), WS_SUBSCRIBE_CHUNK):
+                await socket.send(
+                    json.dumps({"op": "subscribe", "args": args[i : i + WS_SUBSCRIBE_CHUNK]})
+                )
             self._failures = 0
             logger.info("Whale-trade stream tersambung (%d aliran).", len(PAIRS))
             async for message in socket:
                 try:
                     self._handle(message)
                 except Exception:
-                    logger.debug("Pesan aggTrade gagal diproses.", exc_info=True)
+                    logger.debug("Pesan publicTrade gagal diproses.", exc_info=True)
                 finally:
                     # Lepas referensi frame sebelum iterasi berikutnya.
                     del message
@@ -123,44 +131,70 @@ class WhaleTradeWorker:
 
     def _handle(self, message: str | bytes) -> None:
         envelope = json.loads(message)
-        data = envelope.get("data") if isinstance(envelope, dict) else None
-        if not isinstance(data, dict):
+        if not isinstance(envelope, dict):
+            return
+        # Bybit `publicTrade.*` mengirim `data` sebagai LIST trade; ack subscribe
+        # dan pong tidak punya topik itu.
+        topic = str(envelope.get("topic", ""))
+        trades = envelope.get("data")
+        if not topic.startswith("publicTrade.") or not isinstance(trades, list) or not trades:
             return
 
-        try:
-            price = float(data["p"])
-            qty = float(data["q"])
-        except (KeyError, TypeError, ValueError):
-            return
-        usd = price * qty
+        # Binance `@aggTrade` menggabungkan fill dari satu order di harga sama
+        # menjadi satu event; Bybit `publicTrade` tidak. Satu pesan Bybit berisi
+        # fill dari satu match event (satu taker order), jadi kita jumlahkan
+        # per (simbol, sisi) agar notional-nya sebanding dengan event lama.
+        buckets: dict[tuple[str, str], dict[str, Any]] = {}
+        for t in trades:
+            if not isinstance(t, dict):
+                continue
+            try:
+                price = float(t["p"])
+                qty = float(t["v"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            symbol = str(t.get("s", ""))
+            # S = sisi taker (agresor): "Buy" -> BUY agresif, "Sell" -> SELL.
+            side = "SELL" if str(t.get("S", "")).upper() == "SELL" else "BUY"
+            b = buckets.setdefault(
+                (symbol, side), {"qty": 0.0, "usd": 0.0, "last": t}
+            )
+            b["qty"] += qty
+            b["usd"] += price * qty
+            b["last"] = t
+
+        for (symbol, side), b in buckets.items():
+            self._emit_trade(symbol, side, b["qty"], b["usd"], b["last"])
+
+    def _emit_trade(
+        self, symbol: str, side: str, qty: float, usd: float, last: dict
+    ) -> None:
         if usd < self._stream_min:
             return
         important = usd >= self._threshold
 
-        symbol = str(data.get("s", ""))          # BTCUSDT
         asset = symbol[:-4] if symbol.endswith("USDT") else symbol
-        agg_id = data.get("a")
-        # m = buyer is maker -> taker menjual (SELL agresif); else BUY agresif.
-        side = "SELL" if data.get("m") else "BUY"
-        ts = data.get("T")
+        trade_id = last.get("i")
+        price = usd / qty if qty else float(last.get("p", 0) or 0)
+        ts = last.get("T")
         received = (
             datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc).isoformat()
             if ts else datetime.now(tz=timezone.utc).isoformat()
         )
 
         event = {
-            "id": f"binance:{symbol}:{agg_id}",
+            "id": f"bybit:{symbol}:{trade_id}",
             "event_type": "EXCHANGE_TRADE",
-            "network": "binance-cex",
+            "network": "bybit-cex",
             "asset": asset,
             "amount_display": _fmt_qty(qty),
             "amount_usd": round(usd, 2),
-            "price": price,
+            "price": round(price, 8),
             "side": side,
             "from_address": "Whale" if side == "SELL" else "Market",
-            "to_address": "Binance",
+            "to_address": "Bybit",
             "tx_hash": None,
-            "trade_ref": str(agg_id),
+            "trade_ref": str(trade_id),
             "status": "IMPORTANT" if important else (
                 "BULLISH" if side == "BUY" else "BEARISH"
             ),

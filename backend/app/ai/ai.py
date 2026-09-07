@@ -11,15 +11,22 @@ class AIRequest(BaseModel):
 
 def get_crypto_price(symbol: str) -> str:
     """
-    Fungsi mata-mata: Menyedot harga koin real-time dari Binance Public API.
+    Fungsi mata-mata: harga koin real-time dari Bybit v5 (spot).
+    Binance memblokir IP AS (HTTP 451) di Render — sumber dipindah ke Bybit.
     """
     try:
-        # Binance API untuk mendapatkan harga koin (contoh: BTCUSDT)
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}USDT"
+        url = (
+            "https://api.bybit.com/v5/market/tickers"
+            f"?category=spot&symbol={symbol.upper()}USDT"
+        )
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
-            data = response.json()
-            return f"Harga {symbol.upper()} saat ini: ${float(data['price']):.5f} USDT"
+            rows = (response.json().get("result") or {}).get("list") or []
+            if rows:
+                return (
+                    f"Harga {symbol.upper()} saat ini: "
+                    f"${float(rows[0]['lastPrice']):.5f} USDT"
+                )
         return ""
     except Exception:
         return ""

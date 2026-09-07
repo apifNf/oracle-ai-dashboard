@@ -25,23 +25,30 @@ router = APIRouter()
 # Konfigurasi
 # --------------------------------------------------------------------------- #
 
-BINANCE_REST = "https://api.binance.com/api/v3"
-BINANCE_WS = "wss://stream.binance.com:9443/stream"
+# Sumber data: Bybit v5 (spot). Render berlokasi di AS dan Binance memblokir IP
+# AS dengan HTTP 451 (geoblock) — WebSocket & REST Binance mati total di sana.
+# Bybit tidak melakukan geoblock AS, formatnya bersih, dan simbolnya sama
+# (BTCUSDT). Format akhir yang dikirim ke frontend TIDAK berubah.
+BYBIT_REST = "https://api.bybit.com/v5"
+BYBIT_WS = "wss://stream.bybit.com/v5/public/spot"
+WS_SUBSCRIBE_CHUNK = 10             # Bybit membatasi arg per pesan subscribe
 
 # Hanya simbol. Tidak ada harga patokan di sini — begitu ada angka hardcoded,
 # selalu ada godaan untuk memakainya saat jaringan gagal.
 #
-# CATATAN: MATIC, RNDR, dan FTM sudah dihapus. Ketiganya didelisting Binance
-# (MATIC -> POL Sep 2024, RNDR -> RENDER Jul 2024, FTM -> S/Sonic). Satu simbol
-# mati membuat /ticker/24hr?symbols=[...] mengembalikan 400 untuk SELURUH batch.
+# CATATAN: MATIC, RNDR, dan FTM sudah dihapus. Ketiganya didelisting
+# (MATIC -> POL Sep 2024, RNDR -> RENDER Jul 2024, FTM -> S/Sonic). Simbol
+# yang tidak ada di Bybit spot dibuang otomatis oleh _validate_symbols().
 SCANNER_PAIRS: tuple[str, ...] = (
     "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
     "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
     "POL/USDT", "UNI/USDT", "LTC/USDT", "BCH/USDT", "ETC/USDT",
     "FIL/USDT", "ICP/USDT", "VET/USDT", "NEAR/USDT", "OP/USDT",
     "ARB/USDT", "INJ/USDT", "RENDER/USDT", "ATOM/USDT", "IMX/USDT",
-    "STX/USDT", "TRX/USDT", "TAO/USDT", "S/USDT", "SUI/USDT",
+    "STX/USDT", "TRX/USDT", "APT/USDT", "S/USDT", "SUI/USDT",
 )
+# CATATAN: TAO/USDT (Bittensor) diganti APT/USDT — Bybit tidak melistkan TAO di
+# pasar spot ("Not supported symbols"), hanya perpetual. APT likuid di spot.
 
 TICKER_STALE_SECONDS = 30           # di atas ini, harga dianggap basi
 INDICATOR_REFRESH_SECONDS = 300     # klines 1h — tidak ada gunanya lebih cepat
@@ -117,11 +124,12 @@ class Ticker:
 # --------------------------------------------------------------------------- #
 
 
-class BinanceStreamManager:
+class BybitStreamManager:
     """
-    Satu koneksi combined stream untuk semua pasangan.
+    Satu koneksi WebSocket publik Bybit v5 untuk semua pasangan (topik
+    `tickers.<SYMBOL>`).
 
-    Binance memutus koneksi setiap 24 jam sebagai perilaku normal, bukan error.
+    Bursa memutus koneksi secara berkala sebagai perilaku normal, bukan error.
     Reconnect wajib, dan setelah reconnect harga lama sudah basi — karena itu
     snapshot REST dijalankan ulang di setiap reconnect, bukan hanya saat start.
     """
@@ -153,7 +161,7 @@ class BinanceStreamManager:
             headers={"User-Agent": "ORACLE-Dashboard/1.0 (+scanner)"},
         )
         await self._validate_symbols()
-        self._task = asyncio.create_task(self._run(), name="binance-stream")
+        self._task = asyncio.create_task(self._run(), name="bybit-stream")
         logger.info("Stream manager dijalankan untuk %d pasangan.", len(self.tickers))
 
     async def stop(self) -> None:
@@ -171,26 +179,34 @@ class BinanceStreamManager:
 
     async def _validate_symbols(self) -> None:
         """
-        Buang simbol yang tidak diperdagangkan SEBELUM membuka stream.
+        Buang simbol yang tidak ada di Bybit spot SEBELUM membuka stream.
 
-        Ini bukan kehati-hatian berlebihan: satu simbol mati membuat request
-        batch REST gagal total, dan nama stream tidak valid bisa membuat
-        Binance menolak koneksi WebSocket.
+        Ini bukan kehati-hatian berlebihan: nama topik yang tidak valid membuat
+        Bybit membalas error subscribe, dan simbol mati mengotori snapshot REST.
+        Endpoint /market/tickers mengembalikan SELURUH pasangan spot dalam satu
+        respons (tanpa paginasi), jadi dipakai sekaligus untuk validasi.
         """
         assert self._client is not None
         try:
-            response = await self._client.get(f"{BINANCE_REST}/exchangeInfo")
+            response = await self._client.get(
+                f"{BYBIT_REST}/market/tickers", params={"category": "spot"}
+            )
             response.raise_for_status()
             payload = response.json()
+            rows = (payload.get("result") or {}).get("list") or []
         except Exception:
-            logger.warning("exchangeInfo tidak terbaca; melanjutkan tanpa validasi.")
+            logger.warning("Daftar simbol Bybit tidak terbaca; melanjutkan tanpa validasi.")
             return
 
-        tradable = {
-            item["symbol"]
-            for item in payload.get("symbols", [])
-            if item.get("status") == "TRADING"
-        }
+        tradable = {str(item.get("symbol", "")) for item in rows if item.get("symbol")}
+        if len(tradable) < 50:
+            # Respons mencurigakan (mungkin error terselubung) — jangan sampai
+            # salah membuang seluruh daftar aset.
+            logger.warning(
+                "Daftar simbol Bybit hanya %d entri; lewati validasi kali ini.",
+                len(tradable),
+            )
+            return
 
         removed = [
             pair for pair, ticker in self.tickers.items()
@@ -203,7 +219,7 @@ class BinanceStreamManager:
             # Log level error, bukan warning: daftar aset yang basi adalah bug
             # konfigurasi yang perlu diperbaiki manusia.
             logger.error(
-                "Simbol tidak diperdagangkan di Binance dan dikeluarkan dari "
+                "Simbol tidak ada di Bybit spot dan dikeluarkan dari "
                 "scanner: %s. Perbarui SCANNER_PAIRS.", ", ".join(sorted(removed))
             )
 
@@ -221,15 +237,13 @@ class BinanceStreamManager:
         if self._client is None or not self.tickers:
             return 0
 
-        symbols = [t.symbol for t in self.tickers.values()]
-        symbols_param = json.dumps(symbols, separators=(",", ":"))
-
         try:
             response = await self._client.get(
-                f"{BINANCE_REST}/ticker/24hr", params={"symbols": symbols_param}
+                f"{BYBIT_REST}/market/tickers", params={"category": "spot"}
             )
             response.raise_for_status()
-            rows = response.json()
+            payload = response.json()
+            rows = (payload.get("result") or {}).get("list") or []
         except Exception as exc:
             logger.warning("Snapshot REST gagal: %s", type(exc).__name__)
             return 0
@@ -242,10 +256,13 @@ class BinanceStreamManager:
                 continue
             ticker = self.tickers[pair]
             ticker.price = _to_float(row.get("lastPrice"))
-            ticker.change_24h = _to_float(row.get("priceChangePercent"))
-            ticker.high_24h = _to_float(row.get("highPrice"))
-            ticker.low_24h = _to_float(row.get("lowPrice"))
-            ticker.quote_volume = _to_float(row.get("quoteVolume"))
+            # Bybit: price24hPcnt berupa rasio (0.0196), bukan persen.
+            pcnt = _to_float(row.get("price24hPcnt"))
+            ticker.change_24h = pcnt * 100 if pcnt is not None else None
+            ticker.high_24h = _to_float(row.get("highPrice24h"))
+            ticker.low_24h = _to_float(row.get("lowPrice24h"))
+            # turnover24h = volume dalam mata uang quote (USDT), setara quoteVolume.
+            ticker.quote_volume = _to_float(row.get("turnover24h"))
             ticker.updated_at = now
             count += 1
 
@@ -254,9 +271,8 @@ class BinanceStreamManager:
 
     # ---------------------- loop WebSocket ------------------------------- #
 
-    def _stream_url(self) -> str:
-        streams = "/".join(f"{t.symbol.lower()}@ticker" for t in self.tickers.values())
-        return f"{BINANCE_WS}?streams={streams}"
+    def _subscribe_args(self) -> list[str]:
+        return [f"tickers.{t.symbol}" for t in self.tickers.values()]
 
     async def _run(self) -> None:
         while True:
@@ -278,22 +294,29 @@ class BinanceStreamManager:
             await asyncio.sleep(delay)
 
     async def _consume(self) -> None:
-        url = self._stream_url()
         pacer = GcPacer(
             every_seconds=GC_EVERY_SECONDS, every_calls=GC_EVERY_TICKS, tag="scanner-ws"
         )
         async with websockets.connect(
-            url,
+            BYBIT_WS,
             ping_interval=WS_PING_INTERVAL,
             ping_timeout=WS_PING_TIMEOUT,
             close_timeout=10,
             max_size=WS_MAX_SIZE,
             max_queue=WS_MAX_QUEUE,
         ) as socket:
+            # Bybit tidak memakai combined-URL: topik di-subscribe lewat pesan
+            # JSON setelah handshake, dipecah agar tidak melewati batas arg.
+            args = self._subscribe_args()
+            for i in range(0, len(args), WS_SUBSCRIBE_CHUNK):
+                await socket.send(
+                    json.dumps({"op": "subscribe", "args": args[i : i + WS_SUBSCRIBE_CHUNK]})
+                )
+
             self._connected = True
             self._consecutive_failures = 0
             self._last_connect_at = time.time()
-            logger.info("Combined stream tersambung (%d aliran).", len(self.tickers))
+            logger.info("Bybit ticker stream tersambung (%d aliran).", len(self.tickers))
 
             async for message in socket:
                 try:
@@ -307,24 +330,40 @@ class BinanceStreamManager:
 
     def _handle(self, message: str | bytes) -> None:
         envelope = json.loads(message)
-        data = envelope.get("data") if isinstance(envelope, dict) else None
-        if not isinstance(data, dict):
+        if not isinstance(envelope, dict):
             return
 
-        pair = self._symbol_index.get(str(data.get("s", "")).lower())
+        # Abaikan ack subscribe / pong: hanya pesan topik `tickers.*` yang punya
+        # payload harga.
+        topic = str(envelope.get("topic", ""))
+        data = envelope.get("data")
+        if not topic.startswith("tickers.") or not isinstance(data, dict):
+            return
+
+        pair = self._symbol_index.get(str(data.get("symbol", "")).lower())
         if pair is None:
             return
 
         ticker = self.tickers[pair]
-        price = _to_float(data.get("c"))
+        price = _to_float(data.get("lastPrice"))
         if price is None or price <= 0:
             return
 
         ticker.price = price
-        ticker.change_24h = _to_float(data.get("P"))
-        ticker.high_24h = _to_float(data.get("h"))
-        ticker.low_24h = _to_float(data.get("l"))
-        ticker.quote_volume = _to_float(data.get("q"))
+        # Bybit spot mengirim snapshot penuh tiap pesan; tetap jaga nilai lama
+        # kalau suatu field absen.
+        pcnt = _to_float(data.get("price24hPcnt"))
+        if pcnt is not None:
+            ticker.change_24h = pcnt * 100
+        high = _to_float(data.get("highPrice24h"))
+        if high is not None:
+            ticker.high_24h = high
+        low = _to_float(data.get("lowPrice24h"))
+        if low is not None:
+            ticker.low_24h = low
+        vol = _to_float(data.get("turnover24h"))
+        if vol is not None:
+            ticker.quote_volume = vol
         # Pakai waktu lokal, bukan event time dari bursa: yang kita ukur adalah
         # umur data di sisi kita, dan jam server bisa selisih.
         ticker.updated_at = time.time()
@@ -369,7 +408,7 @@ class IndicatorCache:
         self._refreshed_at: float = 0.0
         self._task: asyncio.Task | None = None
 
-    async def start(self, stream: BinanceStreamManager) -> None:
+    async def start(self, stream: BybitStreamManager) -> None:
         if self._task is not None:
             return
         self._task = asyncio.create_task(self._loop(stream), name="indicator-refresh")
@@ -381,7 +420,7 @@ class IndicatorCache:
                 await self._task
             self._task = None
 
-    async def _loop(self, stream: BinanceStreamManager) -> None:
+    async def _loop(self, stream: BybitStreamManager) -> None:
         while True:
             ok_count = 0
             try:
@@ -398,7 +437,7 @@ class IndicatorCache:
             )
             await asyncio.sleep(delay)
 
-    async def refresh(self, stream: BinanceStreamManager) -> int:
+    async def refresh(self, stream: BybitStreamManager) -> int:
         pairs = list(stream.tickers.keys())
         if not pairs:
             return 0
@@ -547,7 +586,7 @@ class ScannerHub:
     """
 
     def __init__(self, redis_client: Any | None = None) -> None:
-        self.stream = BinanceStreamManager()
+        self.stream = BybitStreamManager()
         self.engine = IndicatorEngine()
         self.indicators = IndicatorCache(self.engine)
         self._redis = redis_client

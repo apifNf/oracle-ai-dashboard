@@ -31,7 +31,11 @@ class Settings(BaseSettings):
     # Ambang WHALE ALERT (🚨) untuk transaksi on-chain / eksekusi CEX (USD).
     whale_threshold_usd: float = 500_000.0
     # Ambang minimum yang masuk ke aliran terminal on-chain (flow besar).
-    whale_stream_min_usd: float = 250_000.0
+    # Diturunkan dari 250k: stream Bybit (`publicTrade`) mengirim fill mentah
+    # tanpa agregasi ala Binance `@aggTrade` (worker menggabungkannya per pesan),
+    # jadi notional per event cenderung lebih kecil. 🚨 WHALE ALERT tetap di
+    # whale_threshold_usd (500k).
+    whale_stream_min_usd: float = 120_000.0
     # Endpoint JSON-RPC Ethereum publik (tanpa API key). Boleh dioverride.
     eth_rpc_url: str = "https://ethereum-rpc.publicnode.com"
     # Interval polling worker (detik).
