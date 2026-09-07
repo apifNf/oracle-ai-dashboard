@@ -37,8 +37,14 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["OnChainWorker"]
 
-# Binance memblokir IP AS (HTTP 451) di Render — harga ETH diambil dari Bybit v5.
+# Sumber harga ETH/USD, dicoba berurutan. Binance memblokir IP AS (HTTP 451),
+# dan api.bybit.com kadang membalas 403/451 untuk IP datacenter AS (Render) —
+# padahal WebSocket stream.bybit.com tetap jalan. Karena itu ada rantai
+# cadangan: mirror resmi Bybit (bytick) lalu Coinbase & CoinGecko (ramah IP AS).
 BYBIT_TICKERS_URL = "https://api.bybit.com/v5/market/tickers"
+BYTICK_TICKERS_URL = "https://api.bytick.com/v5/market/tickers"
+COINBASE_ETH_SPOT_URL = "https://api.coinbase.com/v2/prices/ETH-USD/spot"
+COINGECKO_SIMPLE_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
 REQUEST_TIMEOUT = 15.0
 MAX_BLOCKS_PER_CYCLE = 5          # jangan mengejar terlalu jauh sekaligus
 MAX_TX_SCANNED_PER_BLOCK = 400
@@ -96,8 +102,13 @@ class OnChainWorker:
             return
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(REQUEST_TIMEOUT),
+            follow_redirects=True,
             headers={
-                "Content-Type": "application/json",
+                # Content-Type TIDAK dipasang global: httpx sudah menyetelnya
+                # otomatis untuk POST `json=` (JSON-RPC). Kalau dipasang global,
+                # header itu ikut menempel di GET publik (harga ETH) dan bisa
+                # memicu 403 dari WAF/CDN sumber harga.
+                "Accept": "application/json",
                 "User-Agent": "ORACLE-Dashboard/1.0 (+onchain stream)",
             },
         )
@@ -310,20 +321,69 @@ class OnChainWorker:
         if self._eth_price is not None and now - self._eth_price_at < PRICE_REFRESH_SECONDS:
             return self._eth_price
         assert self._client is not None
-        try:
-            response = await self._client.get(
-                BYBIT_TICKERS_URL, params={"category": "spot", "symbol": "ETHUSDT"}
-            )
-            response.raise_for_status()
-            rows = (response.json().get("result") or {}).get("list") or []
-            price = float(rows[0]["lastPrice"]) if rows else 0.0
-        except Exception as exc:
-            logger.warning("Harga ETHUSDT gagal diambil: %s", type(exc).__name__)
-            return self._eth_price  # pakai harga lama kalau ada
-        if price > 0:
-            self._eth_price = price
-            self._eth_price_at = now
-        return self._eth_price
+
+        for name, fetch in (
+            ("bybit", self._eth_price_bybit),
+            ("bytick", self._eth_price_bytick),
+            ("coinbase", self._eth_price_coinbase),
+            ("coingecko", self._eth_price_coingecko),
+        ):
+            try:
+                price = await fetch()
+            except Exception as exc:
+                logger.warning(
+                    "Harga ETHUSDT via %s gagal: %s", name, type(exc).__name__
+                )
+                continue
+            if price and price > 0:
+                if name != "bybit":
+                    logger.info("Harga ETH diambil dari sumber cadangan '%s'.", name)
+                self._eth_price = float(price)
+                self._eth_price_at = now
+                return self._eth_price
+
+        logger.warning(
+            "Semua sumber harga ETH gagal; memakai harga terakhir bila tersedia."
+        )
+        return self._eth_price  # None kalau memang belum pernah berhasil
+
+    async def _eth_price_bybit(self) -> float:
+        return await self._eth_price_bybit_style(BYBIT_TICKERS_URL)
+
+    async def _eth_price_bytick(self) -> float:
+        return await self._eth_price_bybit_style(BYTICK_TICKERS_URL)
+
+    async def _eth_price_bybit_style(self, url: str) -> float:
+        """Bybit v5 GET /v5/market/tickers?category=spot&symbol=ETHUSDT."""
+        assert self._client is not None
+        resp = await self._client.get(
+            url, params={"category": "spot", "symbol": "ETHUSDT"}
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        # HTTP 200 tapi retCode != 0 = permintaan ditolak; anggap gagal.
+        if str(body.get("retCode", "0")) not in ("0", "None"):
+            raise ValueError(f"retCode={body.get('retCode')} {body.get('retMsg')}")
+        rows = (body.get("result") or {}).get("list") or []
+        return float(rows[0]["lastPrice"]) if rows else 0.0
+
+    async def _eth_price_coinbase(self) -> float:
+        """Coinbase GET /v2/prices/ETH-USD/spot -> data.amount (USD, tanpa key)."""
+        assert self._client is not None
+        resp = await self._client.get(COINBASE_ETH_SPOT_URL)
+        resp.raise_for_status()
+        data = resp.json().get("data") or {}
+        return float(data.get("amount") or 0.0)
+
+    async def _eth_price_coingecko(self) -> float:
+        """CoinGecko simple/price -> ethereum.usd (tanpa key)."""
+        assert self._client is not None
+        resp = await self._client.get(
+            COINGECKO_SIMPLE_PRICE_URL,
+            params={"ids": "ethereum", "vs_currencies": "usd"},
+        )
+        resp.raise_for_status()
+        return float((resp.json().get("ethereum") or {}).get("usd") or 0.0)
 
     # ---------------------- mirror opsional --------------------- #
 
