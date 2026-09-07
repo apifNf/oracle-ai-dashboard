@@ -56,6 +56,14 @@ class ExecuteRequest(ProposeRequest):
     exchange_id: str | None = None             # binance|okx|bybit|mexc|indodax
     market_type: Literal["spot", "futures"] | None = None
 
+    # --- Kredensial bursa milik USER (SaaS publik / non-custodial) --------- #
+    # Dikirim browser user dari Settings → Workspace Configuration. Server TIDAK
+    # menyimpannya: dipakai sekali untuk membangun klien CCXT lalu dibuang.
+    # repr=False supaya tidak bocor lewat repr()/traceback framework.
+    api_key: str | None = Field(default=None, repr=False)
+    secret_key: str | None = Field(default=None, repr=False)
+    passphrase: str | None = Field(default=None, repr=False)   # OKX/KuCoin
+
 
 class CloseRequest(BaseModel):
     account_id: str = "default"
@@ -205,9 +213,19 @@ async def trade_execute(body: ExecuteRequest, request: Request) -> dict[str, Any
         return {"status": "ok", "mode": "PAPER_TRADING", "trade": record, "account": summary, "proposal": proposal}
 
     # ---- LIVE (bursa dinamis dari Workspace Configuration) ---- #
+    from app.api.execute_trade import MissingCredentials, redact
+
     exchange_id = (body.exchange_id or settings.default_exchange_id).strip().lower()
     market_type = (body.market_type or settings.default_market_type).strip().lower()
-    api_key, api_secret, api_password = _resolve_exchange_keys(exchange_id)
+
+    # Dry-run tidak menyentuh bursa sama sekali, jadi tidak perlu kunci. Order
+    # sungguhan WAJIB punya kredensial — diprioritaskan milik user.
+    creds = None
+    if not body.dry_run:
+        try:
+            creds = _resolve_exchange_keys(exchange_id, body)
+        except MissingCredentials as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
 
     try:
         trade = await engine.execute_live(
@@ -215,17 +233,22 @@ async def trade_execute(body: ExecuteRequest, request: Request) -> dict[str, Any
             account,
             exchange_id=exchange_id,
             market_type=market_type,
-            api_key=api_key,
-            api_secret=api_secret,
-            api_password=api_password,
+            credentials=creds,
             dry_run=body.dry_run,
         )
     except LiveTradingDisabled as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
+    except MissingCredentials as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     except TradeError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     except Exception as exc:  # error dari bursa
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Eksekusi bursa gagal: {type(exc).__name__}: {exc}")
+        # Bursa kadang menggemakan apiKey di pesan error — bersihkan sebelum
+        # dikirim balik ke klien atau masuk log.
+        detail = redact(exc, body.api_key, body.secret_key, body.passphrase)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Eksekusi bursa gagal: {type(exc).__name__}: {detail}"
+        )
 
     record = trade
     if trade.get("status") in ("OPEN", "DRY_RUN"):
@@ -233,16 +256,35 @@ async def trade_execute(body: ExecuteRequest, request: Request) -> dict[str, Any
     return {"status": "ok", "mode": trade.get("mode", "LIVE"), "trade": record, "proposal": proposal}
 
 
-def _resolve_exchange_keys(exchange_id: str) -> tuple[str | None, str | None, str | None]:
+def _resolve_exchange_keys(exchange_id: str, body: ExecuteRequest) -> Any:
     """
-    Kredensial "Primary Exchange": EXCHANGE_API_KEY/SECRET generik untuk bursa
-    apa pun; khusus Binance, BINANCE_API_KEY/SECRET dipakai sebagai fallback.
+    SaaS publik non-custodial: kredensial dari payload user MENANG.
+
+    `.env` server (EXCHANGE_API_KEY/SECRET, atau BINANCE_API_KEY untuk Binance)
+    hanya fallback single-tenant, dan hanya kalau EXCHANGE_ALLOW_SERVER_KEYS
+    masih true. Di deployment publik setel false supaya tidak ada user yang
+    tanpa sadar mengirim order lewat akun bursa operator.
     """
-    if settings.exchange_api_key and settings.exchange_api_secret:
-        return settings.exchange_api_key, settings.exchange_api_secret, settings.exchange_api_password
-    if exchange_id == "binance":
-        return settings.binance_api_key, settings.binance_api_secret, None
-    return None, None, None
+    from app.api.execute_trade import resolve_credentials
+
+    server_key = settings.exchange_api_key
+    server_secret = settings.exchange_api_secret
+    server_pass = settings.exchange_api_password
+    if not (server_key and server_secret) and exchange_id == "binance":
+        server_key, server_secret, server_pass = (
+            settings.binance_api_key, settings.binance_api_secret, None
+        )
+
+    return resolve_credentials(
+        exchange_id,
+        user_key=body.api_key,
+        user_secret=body.secret_key,
+        user_passphrase=body.passphrase,
+        server_key=server_key,
+        server_secret=server_secret,
+        server_passphrase=server_pass,
+        allow_server_fallback=settings.exchange_allow_server_keys,
+    )
 
 
 @router.post("/close")

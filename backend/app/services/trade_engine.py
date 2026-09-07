@@ -348,16 +348,24 @@ class TradeEngine:
         *,
         exchange_id: str = "binance",
         market_type: str = "spot",
-        api_key: str | None,
-        api_secret: str | None,
-        api_password: str | None = None,
+        credentials: Any = None,
         dry_run: bool = True,
     ) -> dict[str, Any]:
+        """
+        Kirim order ke bursa milik USER.
+
+        `credentials` = Credentials hasil resolve_credentials() di route (kunci
+        user diprioritaskan atas .env server). Wajib untuk order sungguhan;
+        dry_run tidak menyentuh bursa jadi boleh None. Nilai kuncinya tidak
+        pernah masuk record trade, log, atau response.
+        """
         from app.api.execute_trade import (
             EXCHANGE_LABELS,
             ExchangeAdapterError,
+            MissingCredentials,
             build_ccxt_exchange,
             place_order,
+            redact,
             to_ccxt_symbol,
             validate_route,
         )
@@ -417,19 +425,18 @@ class TradeEngine:
                 "note": f"dry_run=true — order TIDAK dikirim ke {label} ({market_type}).",
             }
 
-        if not api_key or not api_secret:
-            raise TradeError(
-                f"Kredensial API {label} belum di-set (EXCHANGE_API_KEY / "
-                f"EXCHANGE_API_SECRET, atau BINANCE_API_KEY untuk Binance)."
+        if credentials is None:
+            raise MissingCredentials(
+                f"Kredensial API {label} belum di-set. Isi API Key, Secret Key"
+                f"{' dan Passphrase' if exchange_id == 'okx' else ''} di "
+                "Settings → Workspace Configuration."
             )
 
         try:
             exchange = build_ccxt_exchange(
                 exchange_id,
                 market_type,
-                api_key=api_key,
-                api_secret=api_secret,
-                api_password=api_password,
+                credentials=credentials,
                 testnet=testnet,
             )
             result = await asyncio.to_thread(
@@ -443,11 +450,17 @@ class TradeEngine:
                 leverage=proposal["applied_leverage"],
                 market_type=market_type,
             )
+        except MissingCredentials:
+            raise
         except ExchangeAdapterError as exc:
-            raise TradeError(str(exc)) from exc
+            raise TradeError(
+                redact(exc, credentials.api_key, credentials.api_secret, credentials.api_password)
+            ) from exc
 
         return {
             **base,
+            # Jejak audit: dari kunci siapa order ini dikirim — TANPA nilai kunci.
+            "credentials_source": credentials.source,
             "status": "OPEN",
             "filled_price": result.get("filled_price") or proposal["entry_price"],
             "exchange_ref": result.get("id"),

@@ -1,5 +1,7 @@
 // Client helpers untuk Trade Execution Engine (Tugas 2).
 
+import { getExchangeCredentials } from "@/lib/workspace";
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -113,9 +115,30 @@ export async function executeTrade(
     dry_run?: boolean;
     exchange_id?: string;   // binance|okx|bybit|mexc|indodax (Workspace Config)
     market_type?: MarketType;
+    // Kredensial bursa milik user. Kalau tidak dikirim eksplisit, diambil
+    // otomatis dari localStorage (Settings → Workspace Configuration).
+    api_key?: string;
+    secret_key?: string;
+    passphrase?: string;
   },
 ) {
-  return post("/api/v1/trade/execute", params);
+  // SaaS publik / non-custodial: order LIVE dikirim memakai kunci bursa milik
+  // user sendiri. Diambil di sini — satu choke point — supaya semua pemanggil
+  // (AI Chat ticket, Scanner ticket, dst.) ikut terlayani tanpa duplikasi.
+  // Paper trading tidak menyentuh bursa, jadi kuncinya tidak pernah dikirim.
+  if (params.mode === "PAPER_TRADING") {
+    const { api_key, secret_key, passphrase, ...safe } = params;
+    return post("/api/v1/trade/execute", safe);
+  }
+
+  const stored = getExchangeCredentials();
+  const body = {
+    ...params,
+    api_key: params.api_key ?? stored.api_key,
+    secret_key: params.secret_key ?? stored.secret_key,
+    passphrase: params.passphrase ?? stored.passphrase,
+  };
+  return post("/api/v1/trade/execute", body);
 }
 
 export async function fetchJournal(accountId: string, limit = 100) {

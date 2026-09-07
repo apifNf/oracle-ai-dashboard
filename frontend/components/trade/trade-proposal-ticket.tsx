@@ -10,7 +10,9 @@ import {
   type ProposalParams, type TradeProposal, type TradeConfig, type TradeMode,
   fetchProposal, fetchTradeConfig, executeTrade,
 } from "@/lib/trade";
-import { useWorkspace, exchangeLabel } from "@/lib/workspace";
+import {
+  useWorkspace, exchangeLabel, credentialsStatus, WORKSPACE_EVENT,
+} from "@/lib/workspace";
 
 type Props = {
   params: ProposalParams;
@@ -42,6 +44,24 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [execError, setExecError] = useState<string | null>(null);
+
+  // Kelengkapan kunci bursa user (SaaS publik / non-custodial). Dibaca dari
+  // localStorage dan ikut berubah begitu Settings di-save — user tidak perlu
+  // reload untuk melihat tombol Auto-Trade aktif.
+  const [creds, setCreds] = useState<{ ready: boolean; missing: string[] }>({
+    ready: false,
+    missing: [],
+  });
+  useEffect(() => {
+    const sync = () => setCreds(credentialsStatus(ws.exchange));
+    sync();
+    window.addEventListener(WORKSPACE_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(WORKSPACE_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, [ws.exchange]);
 
   useEffect(() => {
     let active = true;
@@ -213,6 +233,21 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
         </button>
       </div>
 
+      {/* Kunci bursa user belum lengkap — beri tahu SEBELUM user menekan
+          eksekusi, bukan setelah bursa menolak ordernya. */}
+      {liveEnabled && !creds.ready && (
+        <div className="flex items-start gap-2 px-4 pb-3 -mt-1">
+          <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0 text-amber-500" />
+          <p className="text-[11px] text-amber-700 dark:text-amber-400/90 leading-relaxed">
+            Auto-Trade {exLabel} butuh {creds.missing.join(" + ")} Anda — lengkapi di{" "}
+            <a href="/settings" className="underline underline-offset-2 hover:text-amber-600">
+              Settings → Workspace Configuration
+            </a>
+            . Sampai itu terisi, tombol di atas hanya menjalankan dry-run.
+          </p>
+        </div>
+      )}
+
       {execError && (
         <p className="px-4 pb-3 text-xs text-red-600 dark:text-red-400">{execError}</p>
       )}
@@ -248,11 +283,27 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
                 {proposal.primary_rr ?? "—"}
               </p>
               {confirmMode === "LIVE" && (
-                <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2">
-                  Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
-                  Dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi CCXT tanpa order nyata).
-                  Order sungguhan hanya jika backend TRADE_LIVE_ENABLED=true.
-                </p>
+                <>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2">
+                    Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
+                    Dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi CCXT tanpa order nyata).
+                    Order sungguhan hanya jika backend TRADE_LIVE_ENABLED=true.
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-zinc-500 flex items-start gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 mt-px shrink-0 text-emerald-500" />
+                    {creds.ready ? (
+                      <>
+                        Order akan dikirim memakai <strong>kunci API {exLabel} Anda sendiri</strong>{" "}
+                        (non-custodial). Kunci tidak disimpan di server.
+                      </>
+                    ) : (
+                      <>
+                        Belum ada {creds.missing.join(" + ")} tersimpan — eksekusi ini tetap
+                        dry-run. Lengkapi di Settings untuk Auto-Trade sungguhan.
+                      </>
+                    )}
+                  </p>
+                </>
               )}
             </div>
             <div className="flex gap-2 px-4 py-3 border-t border-slate-200 dark:border-zinc-800">

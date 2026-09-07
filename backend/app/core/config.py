@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # Bursa & tipe pasar default kalau request tidak menyertakannya.
     default_exchange_id: str = "binance"       # binance|okx|bybit|mexc|indodax
     default_market_type: str = "spot"          # spot|futures
+    # SaaS PUBLIK / NON-CUSTODIAL: kunci bursa dikirim per-request dari browser
+    # user dan SELALU menang. Kredensial `.env` di bawah hanya jaring pengaman
+    # untuk deployment single-tenant/dev. Set EXCHANGE_ALLOW_SERVER_KEYS=false di
+    # deployment publik supaya eksekusi MURNI memakai kunci milik user sendiri —
+    # tidak ada trader yang tanpa sadar memakai akun bursa operator.
+    exchange_allow_server_keys: bool = True
     # Kredensial "Primary Exchange" generik (dipakai untuk exchange apa pun).
     # Untuk Binance, binance_api_key/secret di atas juga dipakai sebagai fallback.
     exchange_api_key: str | None = None

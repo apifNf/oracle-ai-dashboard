@@ -1,8 +1,14 @@
 ﻿"use client";
 
 import { useState, useEffect } from "react";
-import { Save, Key, Wallet, Shield, Check } from "lucide-react";
-import { WORKSPACE_EVENT } from "@/lib/workspace";
+import { Save, Key, Wallet, Shield, Check, AlertTriangle } from "lucide-react";
+import {
+  WORKSPACE_EVENT,
+  getExchangeCredentials,
+  saveExchangeCredentials,
+  requiresPassphrase,
+  exchangeLabel,
+} from "@/lib/workspace";
 
 export default function SettingsPage() {
   // 1. Membuat "Ingatan" (State) untuk menyimpan pilihan
@@ -10,6 +16,8 @@ export default function SettingsPage() {
   const [environment, setEnvironment] = useState("spot");
   const [openAiKey, setOpenAiKey] = useState("");
   const [exchangeKey, setExchangeKey] = useState("");
+  const [exchangeSecret, setExchangeSecret] = useState("");
+  const [exchangePassphrase, setExchangePassphrase] = useState("");
   const [isSaved, setIsSaved] = useState(false);
 
   // 2. Mengambil data dari memori saat halaman pertama kali dibuka
@@ -17,12 +25,14 @@ export default function SettingsPage() {
     const savedExchange = localStorage.getItem("oracle_exchange");
     const savedEnv = localStorage.getItem("oracle_environment");
     const savedOpenAi = localStorage.getItem("oracle_openai_key");
-    const savedExchangeKey = localStorage.getItem("oracle_exchange_key");
+    const creds = getExchangeCredentials();
 
     if (savedExchange) setExchange(savedExchange);
     if (savedEnv) setEnvironment(savedEnv);
     if (savedOpenAi) setOpenAiKey(savedOpenAi);
-    if (savedExchangeKey) setExchangeKey(savedExchangeKey);
+    setExchangeKey(creds.api_key);
+    setExchangeSecret(creds.secret_key);
+    setExchangePassphrase(creds.passphrase);
   }, []);
 
   // 3. Fungsi untuk menyimpan data secara permanen saat tombol Save diklik
@@ -30,7 +40,12 @@ export default function SettingsPage() {
     localStorage.setItem("oracle_exchange", exchange);
     localStorage.setItem("oracle_environment", environment);
     localStorage.setItem("oracle_openai_key", openAiKey);
-    localStorage.setItem("oracle_exchange_key", exchangeKey);
+    // API Key + Secret Key + Passphrase disimpan bersama (satu set kredensial).
+    saveExchangeCredentials({
+      api_key: exchangeKey,
+      secret_key: exchangeSecret,
+      passphrase: exchangePassphrase,
+    });
 
     // Beri tahu komponen lain (Trade Ticket, dst.) supaya ikut menyesuaikan.
     window.dispatchEvent(new Event(WORKSPACE_EVENT));
@@ -39,6 +54,20 @@ export default function SettingsPage() {
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
   };
+
+  // Kelas input dipakai berulang — satu sumber kebenaran, bukan copy-paste.
+  const inputClass =
+    "w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono transition-all";
+  const labelClass =
+    "text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors";
+
+  const needsPassphrase = requiresPassphrase(exchange);
+  const exLabel = exchangeLabel(exchange);
+  // Auto-Trade butuh SEMUA kunci; passphrase hanya untuk bursa tertentu.
+  const missing: string[] = [];
+  if (!exchangeKey.trim()) missing.push("API Key");
+  if (!exchangeSecret.trim()) missing.push("Secret Key");
+  if (needsPassphrase && !exchangePassphrase.trim()) missing.push("Passphrase");
 
   return (
     <div className="space-y-6 max-w-4xl relative">
@@ -93,32 +122,100 @@ export default function SettingsPage() {
           </div>
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">ORACLE AI Engine (OpenAI Key)</label>
-              <input 
-                type="password" 
+              <label className={labelClass}>ORACLE AI Engine (OpenAI Key)</label>
+              <input
+                type="password"
                 value={openAiKey}
                 onChange={(e) => setOpenAiKey(e.target.value)}
-                placeholder="sk-..." 
-                className="w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono transition-all" 
+                placeholder="sk-..."
+                className={inputClass}
+              />
+            </div>
+
+            {/* --- Kredensial Auto-Trade: ketiganya satu set --- */}
+            <div className="pt-2 space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 transition-colors">
+                  {exLabel} Auto-Trade Credentials
+                </h3>
+                <span
+                  className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                    missing.length === 0
+                      ? "text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
+                      : "text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10"
+                  }`}
+                >
+                  {missing.length === 0 ? "Auto-Trade Ready" : `Missing: ${missing.join(", ")}`}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed transition-colors">
+                Ketiga kunci di bawah ini <strong>diperlukan untuk Auto-Trade</strong>{" "}
+                menggunakan akun bursa Anda sendiri. Tanpa kunci lengkap, ORACLE hanya
+                bisa menjalankan Paper Trading dan dry-run.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className={labelClass}>Exchange API Key</label>
+              <input
+                type="password"
+                value={exchangeKey}
+                onChange={(e) => setExchangeKey(e.target.value)}
+                placeholder="Enter API Key"
+                autoComplete="off"
+                className={inputClass}
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">Exchange API Key (Optional for Read-Only)</label>
-              <input 
-                type="password" 
-                value={exchangeKey}
-                onChange={(e) => setExchangeKey(e.target.value)}
-                placeholder="Enter API Key" 
-                className="w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono transition-all" 
+              <label className={labelClass}>Exchange Secret Key</label>
+              <input
+                type="password"
+                value={exchangeSecret}
+                onChange={(e) => setExchangeSecret(e.target.value)}
+                placeholder="Enter Secret Key"
+                autoComplete="off"
+                className={inputClass}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className={labelClass}>
+                Exchange Passphrase (khusus OKX/KuCoin)
+                {needsPassphrase && (
+                  <span className="ml-2 text-amber-600 dark:text-amber-400">
+                    — wajib untuk {exLabel}
+                  </span>
+                )}
+              </label>
+              <input
+                type="password"
+                value={exchangePassphrase}
+                onChange={(e) => setExchangePassphrase(e.target.value)}
+                placeholder={needsPassphrase ? "Wajib diisi untuk bursa ini" : "Kosongkan jika bursa Anda tidak memakainya"}
+                autoComplete="off"
+                className={inputClass}
               />
             </div>
           </div>
-          
+
           {/* Security Banner */}
           <div className="flex items-start gap-3 p-4 bg-slate-50 border border-slate-200 dark:bg-zinc-900/50 dark:border-zinc-800 rounded-lg transition-colors">
             <Shield className="w-5 h-5 text-slate-500 dark:text-zinc-400 flex-shrink-0 transition-colors" />
             <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed transition-colors">
-              API Keys are securely saved in your browser's local storage. They are never sent to external databases.
+              <strong>Non-custodial:</strong> kunci disimpan di local storage browser Anda,
+              tidak pernah masuk database ORACLE. Kunci hanya dikirim ke server saat Anda
+              menekan tombol eksekusi, dipakai sekali untuk memanggil bursa, lalu dibuang.
+            </p>
+          </div>
+
+          {/* Peringatan hak akses kunci — ini yang menentukan kerugian maksimum
+              kalau perangkat/browser user disusupi. */}
+          <div className="flex items-start gap-3 p-4 bg-amber-500/5 border border-amber-500/30 rounded-lg transition-colors">
+            <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+            <p className="text-xs text-amber-700 dark:text-amber-300/90 leading-relaxed transition-colors">
+              Buat API key bursa dengan izin <strong>Trade saja</strong> —{" "}
+              <strong>matikan Withdraw</strong> dan aktifkan IP whitelist bila tersedia.
+              Siapa pun yang mengakses browser ini bisa membaca local storage, jadi jangan
+              memakai kunci berizin penarikan dana.
             </p>
           </div>
         </section>

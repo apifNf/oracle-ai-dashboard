@@ -13,6 +13,17 @@ user (Primary Exchange + Trading Environment). TIDAK ada hardcode "Binance".
   - place_order(...) -> create_order generik; CCXT menerjemahkan ke API
     masing-masing bursa.
 
+SaaS Publik / NON-CUSTODIAL
+--------------------------
+ORACLE tidak menyimpan kunci bursa siapa pun di server. Kredensial datang dari
+payload request milik user (dikirim browser-nya sendiri) dan SELALU menang atas
+kredensial `.env` server. `.env` hanya fallback opsional untuk deployment
+single-tenant/dev, dan bisa dimatikan total lewat `EXCHANGE_ALLOW_SERVER_KEYS=false`
+supaya eksekusi murni memakai kunci user.
+
+Kredensial hanya hidup di memori selama satu request: tidak di-log, tidak
+disimpan ke TradeStore, tidak pernah ikut di response.
+
 Guardrail & gate (trade_live_enabled, dry_run, konfirmasi Human-in-the-Loop,
 cap risiko/leverage/notional) tetap ditegakkan di TradeEngine / route — modul
 ini hanya lapisan adaptor bursa.
@@ -21,19 +32,24 @@ ini hanya lapisan adaptor bursa.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "SUPPORTED_EXCHANGES",
     "EXCHANGE_LABELS",
+    "REQUIRES_PASSPHRASE",
     "ExchangeAdapterError",
+    "MissingCredentials",
+    "Credentials",
+    "resolve_credentials",
     "build_ccxt_exchange",
     "to_ccxt_symbol",
     "place_order",
     "futures_default_type",
     "validate_route",
+    "redact",
 ]
 
 # id ccxt (huruf kecil) -> label tampilan
@@ -57,9 +73,38 @@ _FUTURES_TYPE: dict[str, str] = {
     "mexc": "swap",
 }
 
+# Bursa yang mewajibkan passphrase/`password` selain apiKey+secret.
+# (CCXT memetakan passphrase ke field `password` pada config.)
+REQUIRES_PASSPHRASE: set[str] = {"okx", "kucoin", "kucoinfutures", "bitget", "coinbase"}
+
 
 class ExchangeAdapterError(RuntimeError):
     """Konfigurasi bursa / market tidak valid, atau CCXT tidak tersedia."""
+
+
+class MissingCredentials(ExchangeAdapterError):
+    """Kunci API user tidak lengkap untuk bursa yang dipilih."""
+
+
+class Credentials(NamedTuple):
+    """Kredensial bursa untuk SATU request. Jangan pernah di-log/di-persist."""
+
+    api_key: str
+    api_secret: str
+    api_password: str | None
+    source: str  # "user" | "server"
+
+
+def redact(text: Any, *secrets: str | None) -> str:
+    """
+    Buang kunci user dari teks (mis. pesan error CCXT) sebelum masuk log atau
+    response. Bursa kadang menggemakan apiKey di pesan errornya.
+    """
+    out = str(text)
+    for secret in secrets:
+        if secret and len(secret) >= 6:
+            out = out.replace(secret, "***REDACTED***")
+    return out
 
 
 def futures_default_type(exchange_id: str) -> str:
@@ -89,17 +134,96 @@ def validate_route(exchange_id: str, market_type: str) -> tuple[str, str]:
     return _normalize(exchange_id, market_type)
 
 
+def resolve_credentials(
+    exchange_id: str,
+    *,
+    user_key: str | None = None,
+    user_secret: str | None = None,
+    user_passphrase: str | None = None,
+    server_key: str | None = None,
+    server_secret: str | None = None,
+    server_passphrase: str | None = None,
+    allow_server_fallback: bool = True,
+) -> Credentials:
+    """
+    Tentukan kredensial yang dipakai, dengan PRIORITAS kunci milik user.
+
+    Arsitektur SaaS publik non-custodial: kunci yang dikirim browser user selalu
+    menang. `.env` server hanya jaring pengaman untuk deployment single-tenant
+    dan bisa dimatikan lewat allow_server_fallback=False.
+
+    Pasangan kunci tidak pernah dicampur: kalau user mengirim apiKey, secret-nya
+    harus ikut dari user juga — menambal secret server ke apiKey user akan
+    mengirim order dengan identitas yang salah.
+    """
+    ex = (exchange_id or "").strip().lower()
+    label = EXCHANGE_LABELS.get(ex, ex.upper() or "Exchange")
+
+    key = (user_key or "").strip()
+    secret = (user_secret or "").strip()
+    passphrase = (user_passphrase or "").strip() or None
+    source = "user"
+
+    if not (key and secret):
+        if key or secret:
+            raise MissingCredentials(
+                f"Kredensial {label} tidak lengkap: API Key dan Secret Key harus "
+                "diisi berpasangan di Settings → Workspace Configuration."
+            )
+        if not allow_server_fallback:
+            raise MissingCredentials(
+                f"Isi API Key, Secret Key{' dan Passphrase' if ex in REQUIRES_PASSPHRASE else ''} "
+                f"{label} di Settings → Workspace Configuration untuk mengaktifkan Auto-Trade. "
+                "Server ini tidak menyimpan kunci bursa siapa pun."
+            )
+        key = (server_key or "").strip()
+        secret = (server_secret or "").strip()
+        passphrase = (server_passphrase or "").strip() or None
+        source = "server"
+
+    if not (key and secret):
+        raise MissingCredentials(
+            f"Kredensial API {label} belum di-set. Isi API Key + Secret Key di "
+            "Settings → Workspace Configuration."
+        )
+
+    if ex in REQUIRES_PASSPHRASE and not passphrase:
+        raise MissingCredentials(
+            f"{label} mewajibkan Passphrase selain API Key & Secret Key. "
+            "Isi field 'Exchange Passphrase' di Settings → Workspace Configuration."
+        )
+
+    return Credentials(key, secret, passphrase, source)
+
+
 def build_ccxt_exchange(
     exchange_id: str,
     market_type: str,
     *,
-    api_key: str | None,
-    api_secret: str | None,
+    api_key: str | None = None,
+    api_secret: str | None = None,
     api_password: str | None = None,
+    credentials: Credentials | None = None,
     testnet: bool = True,
 ) -> Any:
-    """Instansiasi CCXT dinamis: exchange_class = getattr(ccxt, exchange_id)."""
+    """
+    Instansiasi CCXT dinamis: exchange_class = getattr(ccxt, exchange_id).
+
+    Kredensial: `credentials` (hasil resolve_credentials, jalur SaaS publik)
+    diprioritaskan; api_key/api_secret/api_password hanya jalur langsung untuk
+    pemanggil lama & test. Instance TIDAK pernah dibuat tanpa kunci — bursa akan
+    menolaknya dengan error yang membingungkan, lebih baik gagal cepat di sini.
+    """
     ex, mt = _normalize(exchange_id, market_type)
+
+    if credentials is None:
+        credentials = resolve_credentials(
+            ex,
+            user_key=api_key,
+            user_secret=api_secret,
+            user_passphrase=api_password,
+            allow_server_fallback=False,
+        )
 
     try:
         import ccxt  # type: ignore
@@ -113,13 +237,13 @@ def build_ccxt_exchange(
 
     default_type = futures_default_type(ex) if mt == "futures" else "spot"
     config: dict[str, Any] = {
-        "apiKey": api_key,
-        "secret": api_secret,
+        "apiKey": credentials.api_key,
+        "secret": credentials.api_secret,
         "enableRateLimit": True,
         "options": {"defaultType": default_type},
     }
-    if api_password:
-        config["password"] = api_password  # OKX passphrase, dll.
+    if credentials.api_password:
+        config["password"] = credentials.api_password  # OKX/KuCoin passphrase
 
     exchange = exchange_class(config)
 
@@ -129,6 +253,11 @@ def build_ccxt_exchange(
         except Exception:
             logger.warning("%s tidak mendukung sandbox_mode — lanjut di endpoint live.", ex)
 
+    # Sengaja hanya id bursa + asal kunci; JANGAN pernah log nilai kuncinya.
+    logger.info(
+        "Adaptor %s siap (market=%s, testnet=%s, kredensial=%s).",
+        ex, mt, testnet, credentials.source,
+    )
     return exchange
 
 
