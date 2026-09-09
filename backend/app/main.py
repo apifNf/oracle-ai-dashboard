@@ -48,6 +48,13 @@ async def lifespan(app: FastAPI):
         settings.trade_store_path, settings.paper_start_balance_usdt
     )
 
+    # 1b2. Order book Level 2 — ON-DEMAND, tanpa worker/langganan background.
+    #      Objeknya murni klien HTTP yang dipakai ulang; tidak ada task yang
+    #      berjalan sampai ada request untuk satu simbol tertentu.
+    from app.services.orderbook_service import OrderBookService
+
+    app.state.orderbook_service = OrderBookService()
+
     # 1c. Monetisasi: user tier store + billing (Coinbase Commerce).
     from app.services.user_store import UserStore
     from app.services.billing_store import BillingStore
@@ -162,6 +169,12 @@ async def lifespan(app: FastAPI):
                 await trade_engine.aclose()
             except Exception:
                 logger.exception("Shutdown trade_engine gagal.")
+        orderbook_service = getattr(app.state, "orderbook_service", None)
+        if orderbook_service is not None:
+            try:
+                await orderbook_service.aclose()
+            except Exception:
+                logger.exception("Shutdown orderbook_service gagal.")
         billing_service = getattr(app.state, "billing_service", None)
         if billing_service is not None and hasattr(billing_service, "aclose"):
             try:

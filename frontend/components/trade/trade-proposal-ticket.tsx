@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 import {
   Ticket, ArrowUp, ArrowDown, ShieldCheck, Loader2, AlertTriangle,
   CheckCircle2, X, Beaker, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DetailChart } from "@/components/charts/detail-chart";
+import { OrderBook } from "@/components/trade/order-book";
 import {
   type ProposalParams, type TradeProposal, type TradeConfig, type TradeMode,
   fetchProposal, fetchTradeConfig, executeTrade,
@@ -34,6 +37,13 @@ const fmtPrice = (v: number | null | undefined) => {
 export function TradeProposalTicket({ params, onExecuted }: Props) {
   const ws = useWorkspace(); // Primary Exchange + Trading Environment dari Settings
   const exLabel = exchangeLabel(ws.exchange);
+
+  // Tema untuk chart di modal. `mounted` mencegah mismatch hidrasi: server
+  // tidak tahu tema tersimpan user, jadi render pertama harus netral.
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const isDark = mounted ? resolvedTheme === "dark" : true;
 
   const [proposal, setProposal] = useState<TradeProposal | null>(null);
   const [config, setConfig] = useState<TradeConfig | null>(null);
@@ -252,11 +262,14 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
         <p className="px-4 pb-3 text-xs text-red-600 dark:text-red-400">{execError}</p>
       )}
 
-      {/* Confirm modal */}
+      {/* Confirm modal — lebar, 2 kolom: analisa di kiri, Level 2 di kanan.
+          OrderBook menerima enabled={true} HANYA karena blok ini dirender saat
+          confirmMode terisi; begitu modal ditutup komponennya di-unmount dan
+          hook menghentikan polling + membatalkan request yang masih terbang. */}
       {confirmMode && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/50 dark:bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] shadow-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-zinc-800">
+          <div className="w-full max-w-5xl max-h-[92vh] flex flex-col rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-zinc-800 shrink-0">
               <span className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                 {confirmMode === "PAPER_TRADING" ? (
                   <Beaker className="w-4 h-4 text-emerald-500" />
@@ -264,49 +277,78 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
                   <Zap className="w-4 h-4 text-amber-500" />
                 )}
                 Konfirmasi {confirmMode === "PAPER_TRADING" ? "Paper Trade" : `LIVE ${exLabel} (${ws.environment === "futures" ? "Futures" : "Spot"})`}
+                <span className="font-mono text-xs text-slate-400 dark:text-zinc-500">
+                  · {proposal.symbol}
+                </span>
               </span>
               <button onClick={() => setConfirmMode(null)} className="text-slate-400 hover:text-slate-700 dark:hover:text-white">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-4 space-y-2 text-sm text-slate-700 dark:text-zinc-300">
-              <p>
-                <strong>{proposal.symbol}</strong> {isLong ? "BUY / LONG" : "SELL / SHORT"} ·{" "}
-                {proposal.position_size_coin} coin · {proposal.applied_leverage}x
-              </p>
-              <p className="font-mono text-xs">
-                Entry ${fmtPrice(proposal.entry_price)} · SL ${fmtPrice(proposal.stop_loss_price)} · TP{" "}
-                {proposal.take_profit_targets.map((t) => `$${fmtPrice(t)}`).join(" / ")}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-zinc-500">
-                Est. margin ${fmt(proposal.estimated_margin_usdt)} · risk {proposal.applied_risk_pct}% · R/R{" "}
-                {proposal.primary_rr ?? "—"}
-              </p>
-              {confirmMode === "LIVE" && (
-                <>
-                  <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2">
-                    Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
-                    Dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi CCXT tanpa order nyata).
-                    Order sungguhan hanya jika backend TRADE_LIVE_ENABLED=true.
+
+            <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 p-4">
+              {/* ---- Kolom kiri: chart + ringkasan proposal AI ---- */}
+              <div className="space-y-3 min-w-0">
+                <DetailChart
+                  coin={proposal.symbol.replace(/USDT?$/i, "")}
+                  isDark={isDark}
+                  height={300}
+                  bare
+                />
+
+                <div className="space-y-2 text-sm text-slate-700 dark:text-zinc-300">
+                  <p>
+                    <strong>{proposal.symbol}</strong> {isLong ? "BUY / LONG" : "SELL / SHORT"} ·{" "}
+                    {proposal.position_size_coin} coin · {proposal.applied_leverage}x
                   </p>
-                  <p className="text-xs text-slate-500 dark:text-zinc-500 flex items-start gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 mt-px shrink-0 text-emerald-500" />
-                    {creds.ready ? (
-                      <>
-                        Order akan dikirim memakai <strong>kunci API {exLabel} Anda sendiri</strong>{" "}
-                        (non-custodial). Kunci tidak disimpan di server.
-                      </>
-                    ) : (
-                      <>
-                        Belum ada {creds.missing.join(" + ")} tersimpan — eksekusi ini tetap
-                        dry-run. Lengkapi di Settings untuk Auto-Trade sungguhan.
-                      </>
-                    )}
+                  <p className="font-mono text-xs">
+                    Entry ${fmtPrice(proposal.entry_price)} · SL ${fmtPrice(proposal.stop_loss_price)} · TP{" "}
+                    {proposal.take_profit_targets.map((t) => `$${fmtPrice(t)}`).join(" / ")}
                   </p>
-                </>
-              )}
+                  <p className="text-xs text-slate-500 dark:text-zinc-500">
+                    Est. margin ${fmt(proposal.estimated_margin_usdt)} · risk {proposal.applied_risk_pct}% · R/R{" "}
+                    {proposal.primary_rr ?? "—"}
+                  </p>
+                  {confirmMode === "LIVE" && (
+                    <>
+                      <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2">
+                        Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
+                        Dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi CCXT tanpa order nyata).
+                        Order sungguhan hanya jika backend TRADE_LIVE_ENABLED=true.
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-zinc-500 flex items-start gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 mt-px shrink-0 text-emerald-500" />
+                        {creds.ready ? (
+                          <>
+                            Order akan dikirim memakai <strong>kunci API {exLabel} Anda sendiri</strong>{" "}
+                            (non-custodial). Kunci tidak disimpan di server.
+                          </>
+                        ) : (
+                          <>
+                            Belum ada {creds.missing.join(" + ")} tersimpan — eksekusi ini tetap
+                            dry-run. Lengkapi di Settings untuk Auto-Trade sungguhan.
+                          </>
+                        )}
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* ---- Kolom kanan: Order Book Level 2 (on-demand) ---- */}
+              <div className="min-w-0">
+                <OrderBook
+                  symbol={proposal.symbol}
+                  enabled
+                  marketType={ws.environment}
+                  rows={12}
+                  intervalMs={1500}
+                  className="h-full"
+                />
+              </div>
             </div>
-            <div className="flex gap-2 px-4 py-3 border-t border-slate-200 dark:border-zinc-800">
+
+            <div className="flex gap-2 px-4 py-3 border-t border-slate-200 dark:border-zinc-800 shrink-0">
               <button
                 onClick={() => setConfirmMode(null)}
                 className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"

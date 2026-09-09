@@ -782,6 +782,36 @@ async def scanner_detail(coin: str, request: Request, interval: str = "1h") -> d
     return payload
 
 
+@router.get("/scanner/orderbook/{coin}")
+async def scanner_orderbook(
+    coin: str,
+    request: Request,
+    market_type: str = "spot",
+    depth: int = 20,
+) -> dict[str, Any]:
+    """
+    Order book Level 2 (bids & asks) untuk SATU aset — dipanggil on-demand oleh
+    modal eksekusi saat dibuka, lalu berhenti begitu modal ditutup.
+
+    Sengaja REST, bukan langganan WebSocket global: order book berubah tiap
+    milidetik dan melanggan 30 aset di background adalah jalan tercepat menuju
+    OOM. Di sini tidak ada state yang tumbuh — hanya cache TTL ~1 detik dengan
+    batas jumlah simbol (lihat OrderBookService).
+    """
+    from app.services.orderbook_service import OrderBookError
+
+    service = getattr(request.app.state, "orderbook_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503, detail="OrderBookService belum diinisialisasi."
+        )
+
+    try:
+        return await service.fetch(coin, market_type=market_type, depth=depth)
+    except OrderBookError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @router.websocket("/ws/scanner")
 async def websocket_scanner(websocket: WebSocket) -> None:
     """
