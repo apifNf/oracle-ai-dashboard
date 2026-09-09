@@ -7,6 +7,7 @@ import { fetchJournal, fetchAccount, fetchLivePrices, type TradeRecord } from "@
 import { CloseTradeModal } from "@/components/journal/close-trade-modal";
 import { GlassModal } from "@/components/ui/glass-modal";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
+import { useTranslation } from "@/lib/i18n/context";
 
 const PRICE_POLL_MS = 3000;
 const LEDGER_POLL_MS = 12000;
@@ -33,6 +34,10 @@ const money = (v: number | null | undefined, d = 2) =>
     : "—";
 
 export default function JournalPage() {
+  // Dinamai `tr`, BUKAN `t`: di file ini `t` sudah dipakai sebagai nama
+  // parameter TradeRecord di beberapa callback (.map((t) => ...)). Memakai `t`
+  // akan ter-shadow di dalam callback itu dan diam-diam merusak render baris.
+  const tr = useTranslation();
   const { user } = useAuth();
   const accountId = user?.email || "default";
 
@@ -254,17 +259,17 @@ export default function JournalPage() {
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400 transition-colors">Journal</p>
+          <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400 transition-colors">{tr("journal.eyebrow")}</p>
           <h1 className="mt-2 text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50 transition-colors">
-            <NotebookPen className="w-8 h-8 text-emerald-500" /> Trading Journal
+            <NotebookPen className="w-8 h-8 text-emerald-500" /> {tr("journal.title")}
           </h1>
         </div>
         <button
           onClick={handleOpenAdd}
-          title="Buat catatan jurnal manual (bukan membuka posisi pasar)"
+          title={tr("journal.newJournalTitle")}
           className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-500 transition-colors shadow-sm"
         >
-          <Plus className="w-4 h-4" /> New Journal
+          <Plus className="w-4 h-4" /> {tr("journal.newJournal")}
         </button>
       </div>
 
@@ -273,11 +278,11 @@ export default function JournalPage() {
         <div className="p-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/40">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Zap className="w-4 h-4 text-emerald-500" /> Trade Ledger — ORACLE Engine
+              <Zap className="w-4 h-4 text-emerald-500" /> {tr("journal.ledgerTitle")}
             </h2>
             <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Live · auto-refresh 3s
+              {tr("journal.liveRefresh")}
             </div>
           </div>
 
@@ -285,7 +290,7 @@ export default function JournalPage() {
             <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-3">
                 <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500 flex items-center gap-1">
-                  <Wallet className="w-3 h-3" /> Total Equity (Net Worth)
+                  <Wallet className="w-3 h-3" /> {tr("journal.totalEquity")}
                 </p>
                 <p
                   className={`mt-1 text-lg font-bold font-mono tabular-nums transition-colors ${
@@ -300,7 +305,7 @@ export default function JournalPage() {
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-3">
-                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">Floating PnL</p>
+                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">{tr("journal.floatingPnl")}</p>
                 <p
                   className={`mt-1 text-lg font-bold font-mono tabular-nums ${
                     totalFloating > 0.005
@@ -314,7 +319,7 @@ export default function JournalPage() {
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-3">
-                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">Saldo Virtual</p>
+                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">{tr("journal.virtualBalance")}</p>
                 <p className="mt-1 text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                   ${money(execAccount.balance_usdt)}
                 </p>
@@ -323,7 +328,7 @@ export default function JournalPage() {
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-3">
-                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">Posisi Terbuka</p>
+                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">{tr("journal.openPositions")}</p>
                 <p className="mt-1 text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                   {execAccount.open_positions}
                 </p>
@@ -350,17 +355,17 @@ export default function JournalPage() {
           <table className="w-full text-left text-xs sm:text-sm min-w-[880px]">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 dark:bg-zinc-900/50 dark:border-zinc-800 dark:text-zinc-400">
               <tr>
-                <th className="p-3 font-medium">Time</th>
-                <th className="p-3 font-medium">Asset</th>
-                <th className="p-3 font-medium">Side</th>
-                <th className="p-3 font-medium">Mode</th>
-                <th className="p-3 font-medium">Entry</th>
-                <th className="p-3 font-medium">Current</th>
-                <th className="p-3 font-medium">SL / TP</th>
-                <th className="p-3 font-medium">Size</th>
-                <th className="p-3 font-medium">Margin</th>
-                <th className="p-3 font-medium">Status</th>
-                <th className="p-3 font-medium">PnL / Floating (RoE)</th>
+                <th className="p-3 font-medium">{tr("journal.table.time")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.asset")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.side")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.mode")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.entry")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.current")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.slTp")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.size")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.margin")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.status")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.pnl")}</th>
                 <th className="p-3 font-medium"></th>
               </tr>
             </thead>
@@ -374,7 +379,7 @@ export default function JournalPage() {
               ) : execTrades.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="p-8 text-center text-slate-400 dark:text-zinc-500">
-                    Belum ada trade dieksekusi. Buka proposal dari AI Chat atau Scanner.
+                    {tr("journal.emptyLedger")}
                   </td>
                 </tr>
               ) : (
@@ -434,7 +439,7 @@ export default function JournalPage() {
                     <td className="p-3 font-mono font-semibold whitespace-nowrap tabular-nums">
                       {isOpen ? (
                         fPnl === null ? (
-                          <span className="text-slate-400 dark:text-zinc-600">calculating…</span>
+                          <span className="text-slate-400 dark:text-zinc-600">{tr("journal.calculating")}</span>
                         ) : (
                           <span
                             className={`inline-flex items-center gap-1.5 ${
@@ -470,7 +475,7 @@ export default function JournalPage() {
                           onClick={() => setCloseTarget(t)}
                           className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-rose-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors"
                         >
-                          Close
+                          {tr("journal.closePosition")}
                         </button>
                       )}
                     </td>
@@ -485,22 +490,22 @@ export default function JournalPage() {
 
       {/* TABLE SECTION */}
       <div className="border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl overflow-hidden mt-6 shadow-sm dark:shadow-none transition-colors duration-500">
-        <div className="px-4 pt-4 text-sm font-semibold text-slate-900 dark:text-white">Manual Journal</div>
+        <div className="px-4 pt-4 text-sm font-semibold text-slate-900 dark:text-white">{tr("journal.manual.title")}</div>
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 dark:bg-zinc-900/50 dark:border-zinc-800 dark:text-zinc-400 transition-colors">
             <tr>
-              <th className="p-4 font-medium">Date</th>
-              <th className="p-4 font-medium">Asset Pair</th>
-              <th className="p-4 font-medium">Position</th>
-              <th className="p-4 font-medium">PnL Result</th>
-              <th className="p-4 font-medium">Notes</th>
+              <th className="p-4 font-medium">{tr("journal.manual.date")}</th>
+              <th className="p-4 font-medium">{tr("journal.manual.assetPair")}</th>
+              <th className="p-4 font-medium">{tr("journal.manual.position")}</th>
+              <th className="p-4 font-medium">{tr("journal.manual.pnlResult")}</th>
+              <th className="p-4 font-medium">{tr("journal.manual.notes")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/50 transition-colors">
             {trades.length === 0 ? (
               <tr>
                 <td colSpan={5} className="p-8 text-center text-slate-400 dark:text-zinc-500">
-                  No trades recorded yet. Click "New Entry" to log your first trade.
+                  {tr("journal.manual.empty")}
                 </td>
               </tr>
             ) : (
@@ -509,7 +514,7 @@ export default function JournalPage() {
                   key={trade.id} 
                   onClick={() => openTradeDetails(trade)}
                   className="cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900/30 transition-colors"
-                  title="Click to view full details"
+                  title={tr("journal.manual.viewDetails")}
                 >
                   <td className="p-4 text-slate-500 dark:text-zinc-400">{trade.date}</td>
                   <td className="p-4 font-bold text-slate-900 dark:text-white">{trade.pair}</td>
@@ -557,17 +562,17 @@ export default function JournalPage() {
             <form onSubmit={handleSaveTrade} className="p-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">Asset Pair</label>
+                  <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">{tr("journal.manual.assetPair")}</label>
                   <input 
                     required 
                     value={newPair} 
                     onChange={(e) => setNewPair(e.target.value)} 
-                    placeholder="e.g., BTC/USDT" 
+                    placeholder={tr("journal.form.assetPlaceholder")} 
                     className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors" 
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">Position</label>
+                  <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">{tr("journal.manual.position")}</label>
                   <select 
                     value={newType} 
                     onChange={(e) => setNewType(e.target.value)} 
@@ -580,24 +585,24 @@ export default function JournalPage() {
               </div>
               
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">PnL % (use + or -)</label>
+                <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">{tr("journal.form.pnlPercent")}</label>
                 <input 
                   required 
                   value={newPnl} 
                   onChange={(e) => setNewPnl(e.target.value)} 
-                  placeholder="e.g., +5.5% or -2.1%" 
+                  placeholder={tr("journal.form.pnlPlaceholder")} 
                   className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-2.5 text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors" 
                 />
               </div>
               
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">Trade Notes & Lessons</label>
+                <label className="text-xs font-medium text-slate-500 dark:text-zinc-400">{tr("journal.form.notesLabel")}</label>
                 <textarea 
                   required 
                   value={newNotes} 
                   onChange={(e) => setNewNotes(e.target.value)} 
                   rows={3} 
-                  placeholder="Why did you take this trade?" 
+                  placeholder={tr("journal.form.notesPlaceholder")} 
                   className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors" 
                 />
               </div>
@@ -617,7 +622,7 @@ export default function JournalPage() {
             
             <div className="flex justify-between items-center p-4 border-b border-slate-200 dark:border-zinc-800 transition-colors">
               <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-900 dark:text-white">
-                <FileText className="w-5 h-5 text-emerald-500" /> Trade Details
+                <FileText className="w-5 h-5 text-emerald-500" /> {tr("journal.details.title")}
               </h2>
               <button onClick={() => setIsViewModalOpen(false)} className="text-slate-400 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-white transition-colors">
                 <X className="w-5 h-5" />
@@ -627,15 +632,15 @@ export default function JournalPage() {
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-2 gap-y-6 gap-x-4">
                 <div>
-                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">Asset Pair</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">{tr("journal.manual.assetPair")}</p>
                   <p className="text-lg font-bold text-slate-900 dark:text-white">{selectedTrade.pair}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">Date</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">{tr("journal.manual.date")}</p>
                   <p className="text-sm font-medium text-slate-900 dark:text-zinc-200 mt-1">{selectedTrade.date}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">Position</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">{tr("journal.manual.position")}</p>
                   <span className={`inline-block mt-1 px-3 py-1 rounded text-xs font-bold ${
                     selectedTrade.type === "LONG" 
                       ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500" 
@@ -645,7 +650,7 @@ export default function JournalPage() {
                   </span>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">PnL Result</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">{tr("journal.manual.pnlResult")}</p>
                   <div className={`flex items-center gap-1 font-mono font-bold mt-1 ${
                     selectedTrade.pnl.startsWith("+") 
                       ? "text-emerald-600 dark:text-emerald-500" 
@@ -658,7 +663,7 @@ export default function JournalPage() {
               </div>
 
               <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-2">Trade Notes & Lessons</p>
+                <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 mb-2">{tr("journal.form.notesLabel")}</p>
                 <div className="p-4 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed min-h-[100px]">
                   {selectedTrade.notes}
                 </div>
@@ -670,13 +675,13 @@ export default function JournalPage() {
                   onClick={handleDelete}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 dark:text-red-500 dark:bg-red-500/10 dark:hover:bg-red-500/20 rounded-lg transition-colors"
                 >
-                  <Trash2 className="w-4 h-4" /> Delete
+                  <Trash2 className="w-4 h-4" /> {tr("common.delete")}
                 </button>
                 <button 
                   onClick={handleOpenEdit}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 dark:text-white dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-lg transition-colors shadow-sm dark:shadow-none"
                 >
-                  <Edit2 className="w-4 h-4" /> Edit Entry
+                  <Edit2 className="w-4 h-4" /> {tr("journal.details.edit")}
                 </button>
               </div>
 
@@ -697,7 +702,7 @@ export default function JournalPage() {
       <GlassModal
         open={deleteConfirm}
         onClose={() => setDeleteConfirm(false)}
-        title="Hapus Entri Jurnal"
+        title={tr("journal.delete.title")}
         icon={<Trash2 className="w-4 h-4 text-rose-400" />}
         footer={
           <>
@@ -705,13 +710,13 @@ export default function JournalPage() {
               onClick={() => setDeleteConfirm(false)}
               className="flex-1 rounded-xl border border-white/10 py-2.5 px-4 text-sm font-medium text-zinc-400 hover:text-white hover:border-white/20 transition"
             >
-              Batal
+              {tr("common.cancel")}
             </button>
             <button
               onClick={confirmDelete}
               className="flex-1 rounded-xl bg-rose-600/90 hover:bg-rose-500 py-2.5 px-4 font-semibold text-white shadow-lg transition"
             >
-              Hapus
+              {tr("common.delete")}
             </button>
           </>
         }
@@ -719,7 +724,7 @@ export default function JournalPage() {
         <p className="text-sm text-zinc-400">
           Hapus catatan jurnal untuk{" "}
           <span className="font-mono font-semibold text-white">{selectedTrade?.pair}</span>?
-          Tindakan ini tidak bisa dibatalkan.
+          {tr("journal.delete.warning")}
         </p>
       </GlassModal>
 

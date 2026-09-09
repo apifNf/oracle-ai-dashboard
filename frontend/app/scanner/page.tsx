@@ -11,6 +11,7 @@ import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
 import { DetailChart } from "@/components/charts/detail-chart";
 import { TradingStepsBanner } from "@/components/onboarding/trading-steps-banner";
 import { useTranslation } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import { proposalParamsFromSignal } from "@/lib/trade";
 import { useAccountId, fetchBillingStatus, type BillingStatus } from "@/lib/billing";
 import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
@@ -77,26 +78,26 @@ const RECONNECT_MAX_MS = 30_000;
 const SNAPSHOT_STALE_MS = 20_000;
 
 /** Label kriteria — sengaja verbatim aturannya, supaya bisa diaudit user. */
-const CRITERIA_LABELS: Record<string, string> = {
-  ema20_above_ema50: "EMA20 di atas EMA50",
-  ema20_below_ema50: "EMA20 di bawah EMA50",
-  rsi_below_overbought: "RSI di bawah 70",
-  rsi_above_oversold: "RSI di atas 30",
-  rsi_above_midline: "RSI di atas 50",
-  rsi_below_midline: "RSI di bawah 50",
+const CRITERIA_LABELS: Record<string, TranslationKey> = {
+  ema20_above_ema50: "scanner.criteria.ema20AboveEma50",
+  ema20_below_ema50: "scanner.criteria.ema20BelowEma50",
+  rsi_below_overbought: "scanner.criteria.rsiBelowOverbought",
+  rsi_above_oversold: "scanner.criteria.rsiAboveOversold",
+  rsi_above_midline: "scanner.criteria.rsiAboveMidline",
+  rsi_below_midline: "scanner.criteria.rsiBelowMidline",
 };
 
 const BULLISH_CRITERIA = ["ema20_above_ema50", "rsi_below_overbought", "rsi_above_midline"];
 const BEARISH_CRITERIA = ["ema20_below_ema50", "rsi_above_oversold", "rsi_below_midline"];
 
-const STATUS_COPY: Record<AssetStatus, { label: string; detail: string }> = {
-  ok: { label: "Terkini", detail: "" },
-  stale: { label: "Tertunda", detail: "Harga terakhir sudah lewat beberapa saat." },
-  pending: { label: "Menunggu", detail: "Indikator belum selesai dihitung." },
-  unavailable: { label: "Tidak tersedia", detail: "Data harga belum bisa diambil." },
-  insufficient_history: { label: "Riwayat kurang", detail: "Candle belum cukup untuk indikator yang konvergen." },
-  blocked_by_market_status: { label: "Dihentikan", detail: "Perhitungan dibatalkan karena data harga bermasalah." },
-  unknown_symbol: { label: "Tidak dikenal", detail: "Aset tidak ada dalam daftar." },
+const STATUS_COPY: Record<AssetStatus, { label: TranslationKey; detail: TranslationKey }> = {
+  ok: { label: "scanner.assetStatus.ok", detail: "scanner.assetDetail.ok" },
+  stale: { label: "scanner.assetStatus.stale", detail: "scanner.assetDetail.stale" },
+  pending: { label: "scanner.assetStatus.pending", detail: "scanner.assetDetail.pending" },
+  unavailable: { label: "scanner.assetStatus.unavailable", detail: "scanner.assetDetail.unavailable" },
+  insufficient_history: { label: "scanner.assetStatus.insufficientHistory", detail: "scanner.assetDetail.insufficientHistory" },
+  blocked_by_market_status: { label: "scanner.assetStatus.blocked", detail: "scanner.assetDetail.blocked" },
+  unknown_symbol: { label: "scanner.assetStatus.unknownSymbol", detail: "scanner.assetDetail.unknownSymbol" },
 };
 
 /* ================================================================== */
@@ -114,12 +115,16 @@ const fmtPrice = (value: number | null | undefined): string => {
   return value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 };
 
-const ageText = (seconds: number | null): string => {
-  if (seconds === null) return "—";
-  if (seconds < 60) return `${seconds} dtk lalu`;
+type Translate = ReturnType<typeof useTranslation>;
+
+// Fungsi murni: `t` diterima sebagai argumen, bukan hook — supaya tetap bisa
+// dipanggil dari mana pun tanpa mengikat komponen.
+const ageText = (t: Translate, seconds: number | null): string => {
+  if (seconds === null) return t("scanner.age.unknown");
+  if (seconds < 60) return t("scanner.age.seconds", { value: seconds });
   const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins} mnt lalu`;
-  return `${Math.floor(mins / 60)} jam lalu`;
+  if (mins < 60) return t("scanner.age.minutes", { value: mins });
+  return t("scanner.age.hours", { value: Math.floor(mins / 60) });
 };
 
 /* ================================================================== */
@@ -127,21 +132,19 @@ const ageText = (seconds: number | null): string => {
 /* ================================================================== */
 
 function RiskDisclaimer({ text }: { text?: string }) {
+  const t = useTranslation();
   return (
     <div className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/20 p-4 sm:p-5">
       <div className="flex gap-3">
         <ShieldAlert className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-500 mt-0.5" />
         <div className="space-y-2">
           <p className="text-sm font-semibold text-amber-900 dark:text-amber-400">
-            Peringatan Risiko — Bukan Nasihat Keuangan
+            {t("scanner.risk.title")}
           </p>
           <p className="text-xs leading-relaxed text-amber-800/90 dark:text-amber-300/80">
-            Sinyal di halaman ini dihasilkan aturan teknikal deterministik yang{" "}
-            <strong>belum diuji terhadap data historis</strong>. Tidak ada probabilitas
-            terkalibrasi, tidak ada jaminan akurasi, dan tidak ada proyeksi keuntungan.
-            Perdagangan aset kripto berisiko tinggi dan dapat mengakibatkan kehilangan
-            seluruh modal. Keputusan transaksi sepenuhnya menjadi tanggung jawab Anda.
-            ORACLE tidak memberikan rekomendasi investasi.
+            {t("scanner.risk.bodyBefore")}{" "}
+            <strong>{t("scanner.risk.bodyStrong")}</strong>
+            {t("scanner.risk.bodyAfter")}
           </p>
           {text && (
             <p className="text-[11px] font-mono text-amber-700/70 dark:text-amber-400/60 pt-1 border-t border-amber-200 dark:border-amber-900/50">
@@ -159,6 +162,7 @@ function RiskDisclaimer({ text }: { text?: string }) {
 /* ================================================================== */
 
 function CriteriaList({ met, total }: { met: string[]; total: number }) {
+  const t = useTranslation();
   // Tampilkan hanya kriteria dari arah yang relevan, supaya user melihat
   // "2 dari 3 syarat bullish" dan bukan daftar enam syarat bercampur.
   const family = met.some((m) => BULLISH_CRITERIA.includes(m))
@@ -170,7 +174,7 @@ function CriteriaList({ met, total }: { met: string[]; total: number }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-sm">
-        <span className="text-slate-500 dark:text-zinc-400 font-medium">Kriteria terpenuhi</span>
+        <span className="text-slate-500 dark:text-zinc-400 font-medium">{t("scanner.card.criteriaMet")}</span>
         <span className="font-mono font-semibold text-slate-900 dark:text-zinc-100">
           {met.length} / {total}
         </span>
@@ -191,14 +195,14 @@ function CriteriaList({ met, total }: { met: string[]; total: number }) {
                 )}
               >
                 {isMet ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
-                {CRITERIA_LABELS[key] ?? key}
+                {CRITERIA_LABELS[key] ? t(CRITERIA_LABELS[key]) : key}
               </span>
             );
           })}
         </div>
       ) : (
         <p className="text-[11px] text-slate-400 dark:text-zinc-600">
-          Tidak ada kriteria arah yang terpenuhi.
+          {t("scanner.card.noCriteria")}
         </p>
       )}
     </div>
@@ -210,6 +214,7 @@ function CriteriaList({ met, total }: { met: string[]; total: number }) {
 /* ================================================================== */
 
 function StatusPill({ status, ageSeconds }: { status: AssetStatus; ageSeconds: number | null }) {
+  const t = useTranslation();
   if (status === "ok") return null;
 
   const copy = STATUS_COPY[status] ?? STATUS_COPY.unavailable;
@@ -221,8 +226,8 @@ function StatusPill({ status, ageSeconds }: { status: AssetStatus; ageSeconds: n
   return (
     <span className={cn("inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border", tone)}>
       <AlertTriangle className="w-3 h-3" />
-      {copy.label}
-      {status === "stale" && ageSeconds !== null && ` · ${ageText(ageSeconds)}`}
+      {t(copy.label)}
+      {status === "stale" && ageSeconds !== null && ` · ${ageText(t, ageSeconds)}`}
     </span>
   );
 }
@@ -384,7 +389,7 @@ export default function ScannerPage() {
                 ` · ${t("scanner.ruleSet", { rule: snapshot.signals[0].rule_set })}`}
               {snapshot.indicators_age_seconds !== null &&
                 ` · ${t("scanner.indicatorsAge", {
-                  age: ageText(snapshot.indicators_age_seconds),
+                  age: ageText(t, snapshot.indicators_age_seconds),
                 })}`}
             </p>
           )}
@@ -530,7 +535,7 @@ export default function ScannerPage() {
                       </span>
                     ) : (
                       <span className="px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider border bg-slate-100 text-slate-500 border-slate-200 dark:bg-zinc-900 dark:text-zinc-500 dark:border-zinc-800 shrink-0">
-                        Tidak ada sinyal
+                        {t("scanner.card.noSignal")}
                       </span>
                     )}
                   </div>
@@ -540,7 +545,8 @@ export default function ScannerPage() {
                     <div className="mb-4 space-y-1.5">
                       <StatusPill status={item.status} ageSeconds={item.price_age_seconds} />
                       <p className="text-[11px] text-slate-500 dark:text-zinc-500 leading-relaxed">
-                        {item.error?.message ?? STATUS_COPY[item.status]?.detail}
+                        {item.error?.message ??
+                          (STATUS_COPY[item.status] ? t(STATUS_COPY[item.status].detail) : "")}
                       </p>
                     </div>
                   )}
@@ -569,12 +575,12 @@ export default function ScannerPage() {
                       </div>
 
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500 dark:text-zinc-400 font-medium">Tren</span>
+                        <span className="text-slate-500 dark:text-zinc-400 font-medium">{t("scanner.card.trend")}</span>
                         <div className="flex items-center gap-1.5 font-medium">
                           {item.trend?.toLowerCase() === "bullish" ? (
-                            <><TrendingUp className="w-4 h-4 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-500">Bullish</span></>
+                            <><TrendingUp className="w-4 h-4 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-500">{t("scanner.trend.bullish")}</span></>
                           ) : item.trend?.toLowerCase() === "bearish" ? (
-                            <><TrendingDown className="w-4 h-4 text-red-500" /><span className="text-red-600 dark:text-red-500">Bearish</span></>
+                            <><TrendingDown className="w-4 h-4 text-red-500" /><span className="text-red-600 dark:text-red-500">{t("scanner.trend.bearish")}</span></>
                           ) : (
                             <><Minus className="w-4 h-4 text-slate-400 dark:text-zinc-500" /><span className="text-slate-500 dark:text-zinc-400">—</span></>
                           )}
@@ -613,8 +619,7 @@ export default function ScannerPage() {
                     </div>
                   ) : (
                     <p className="text-xs text-slate-400 dark:text-zinc-600 border-t border-slate-100 dark:border-zinc-800/50 pt-3">
-                      Indikator tidak dihitung untuk aset ini. Tidak ada angka yang
-                      ditampilkan agar tidak menyesatkan.
+                      {t("scanner.card.notCalculated")}
                     </p>
                   )}
                 </div>
@@ -640,10 +645,10 @@ export default function ScannerPage() {
                       <Lock className="w-5 h-5 text-slate-400 dark:text-zinc-500 group-hover:text-emerald-500 transition-colors duration-500" />
                     </div>
                     <span className="text-sm font-bold tracking-widest text-slate-900 dark:text-white uppercase">
-                      Pro Alpha Signal
+                      {t("scanner.locked.title")}
                     </span>
                     <span className="text-xs font-medium text-slate-500 dark:text-zinc-400 mt-1">
-                      Klik untuk upgrade — buka kunci
+                      {t("scanner.locked.subtitle")}
                     </span>
                   </div>
                 )}

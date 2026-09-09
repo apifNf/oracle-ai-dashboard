@@ -9,8 +9,11 @@ import {
   requiresPassphrase,
   exchangeLabel,
 } from "@/lib/workspace";
+import { useTranslation } from "@/lib/i18n/context";
 
 export default function SettingsPage() {
+  const t = useTranslation();
+
   // 1. Membuat "Ingatan" (State) untuk menyimpan pilihan
   const [exchange, setExchange] = useState("okx");
   const [environment, setEnvironment] = useState("spot");
@@ -65,16 +68,16 @@ export default function SettingsPage() {
   const exLabel = exchangeLabel(exchange);
   // Auto-Trade butuh SEMUA kunci; passphrase hanya untuk bursa tertentu.
   const missing: string[] = [];
-  if (!exchangeKey.trim()) missing.push("API Key");
-  if (!exchangeSecret.trim()) missing.push("Secret Key");
-  if (needsPassphrase && !exchangePassphrase.trim()) missing.push("Passphrase");
+  if (!exchangeKey.trim()) missing.push(t("settings.field.apiKey"));
+  if (!exchangeSecret.trim()) missing.push(t("settings.field.secretKey"));
+  if (needsPassphrase && !exchangePassphrase.trim()) missing.push(t("settings.field.passphrase"));
 
   return (
     <div className="space-y-6 max-w-4xl relative">
       {/* HEADER */}
       <div>
-        <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400 transition-colors">Settings</p>
-        <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-zinc-50 transition-colors">Workspace Configuration</h1>
+        <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400 transition-colors">{t("settings.eyebrow")}</p>
+        <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-zinc-50 transition-colors">{t("settings.title")}</h1>
       </div>
 
       <div className="grid gap-6 mt-8">
@@ -83,11 +86,11 @@ export default function SettingsPage() {
         <section className="p-6 border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl space-y-5 shadow-sm dark:shadow-none transition-colors duration-500">
           <div className="flex items-center gap-3 border-b border-slate-200 dark:border-zinc-800/50 pb-4 transition-colors">
             <Wallet className="w-5 h-5 text-emerald-500" />
-            <h2 className="text-lg font-medium text-slate-900 dark:text-zinc-100 transition-colors">Exchange Connectivity</h2>
+            <h2 className="text-lg font-medium text-slate-900 dark:text-zinc-100 transition-colors">{t("settings.exchangeConnectivity")}</h2>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">Primary Exchange</label>
+              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">{t("settings.primaryExchange")}</label>
               <select 
                 value={exchange}
                 onChange={(e) => setExchange(e.target.value)}
@@ -101,14 +104,14 @@ export default function SettingsPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">Trading Environment</label>
+              <label className="text-sm font-medium text-slate-500 dark:text-zinc-400 transition-colors">{t("settings.tradingEnvironment")}</label>
               <select 
                 value={environment}
                 onChange={(e) => setEnvironment(e.target.value)}
                 className="w-full p-3 bg-slate-50 border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
               >
-                <option value="spot">Spot Market</option>
-                <option value="futures">Perpetual Futures</option>
+                <option value="spot">{t("settings.spotMarket")}</option>
+                <option value="futures">{t("settings.perpetualFutures")}</option>
               </select>
             </div>
           </div>
@@ -118,11 +121,11 @@ export default function SettingsPage() {
         <section className="p-6 border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl space-y-5 shadow-sm dark:shadow-none transition-colors duration-500">
           <div className="flex items-center gap-3 border-b border-slate-200 dark:border-zinc-800/50 pb-4 transition-colors">
             <Key className="w-5 h-5 text-emerald-500" />
-            <h2 className="text-lg font-medium text-slate-900 dark:text-zinc-100 transition-colors">API Keys & Security</h2>
+            <h2 className="text-lg font-medium text-slate-900 dark:text-zinc-100 transition-colors">{t("settings.apiKeysSecurity")}</h2>
           </div>
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className={labelClass}>ORACLE AI Engine (OpenAI Key)</label>
+              <label className={labelClass}>{t("settings.openAiLabel")}</label>
               <input
                 type="password"
                 value={openAiKey}
@@ -136,7 +139,7 @@ export default function SettingsPage() {
             <div className="pt-2 space-y-2">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-zinc-100 transition-colors">
-                  {exLabel} Auto-Trade Credentials
+                  {t("settings.credentials.title", { exchange: exLabel })}
                 </h3>
                 <span
                   className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
@@ -145,44 +148,46 @@ export default function SettingsPage() {
                       : "text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/10"
                   }`}
                 >
-                  {missing.length === 0 ? "Auto-Trade Ready" : `Missing: ${missing.join(", ")}`}
+                  {missing.length === 0
+                    ? t("settings.credentials.ready")
+                    : t("settings.credentials.missing", { fields: missing.join(", ") })}
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed transition-colors">
-                Ketiga kunci di bawah ini <strong>diperlukan untuk Auto-Trade</strong>{" "}
-                menggunakan akun bursa Anda sendiri. Tanpa kunci lengkap, ORACLE hanya
-                bisa menjalankan Paper Trading dan dry-run.
+                {t("settings.credentials.helpBefore")}{" "}
+                <strong>{t("settings.credentials.helpStrong")}</strong>{" "}
+                {t("settings.credentials.helpAfter")}
               </p>
             </div>
 
             <div className="space-y-2">
-              <label className={labelClass}>Exchange API Key</label>
+              <label className={labelClass}>{t("settings.apiKey")}</label>
               <input
                 type="password"
                 value={exchangeKey}
                 onChange={(e) => setExchangeKey(e.target.value)}
-                placeholder="Enter API Key"
+                placeholder={t("settings.apiKeyPlaceholder")}
                 autoComplete="off"
                 className={inputClass}
               />
             </div>
             <div className="space-y-2">
-              <label className={labelClass}>Exchange Secret Key</label>
+              <label className={labelClass}>{t("settings.secretKey")}</label>
               <input
                 type="password"
                 value={exchangeSecret}
                 onChange={(e) => setExchangeSecret(e.target.value)}
-                placeholder="Enter Secret Key"
+                placeholder={t("settings.secretKeyPlaceholder")}
                 autoComplete="off"
                 className={inputClass}
               />
             </div>
             <div className="space-y-2">
               <label className={labelClass}>
-                Exchange Passphrase (khusus OKX/KuCoin)
+                {t("settings.passphrase")}
                 {needsPassphrase && (
                   <span className="ml-2 text-amber-600 dark:text-amber-400">
-                    — wajib untuk {exLabel}
+                    {t("settings.passphraseRequired", { exchange: exLabel })}
                   </span>
                 )}
               </label>
@@ -190,7 +195,9 @@ export default function SettingsPage() {
                 type="password"
                 value={exchangePassphrase}
                 onChange={(e) => setExchangePassphrase(e.target.value)}
-                placeholder={needsPassphrase ? "Wajib diisi untuk bursa ini" : "Kosongkan jika bursa Anda tidak memakainya"}
+                placeholder={needsPassphrase
+                  ? t("settings.passphraseRequiredPlaceholder")
+                  : t("settings.passphraseOptionalPlaceholder")}
                 autoComplete="off"
                 className={inputClass}
               />
@@ -201,9 +208,7 @@ export default function SettingsPage() {
           <div className="flex items-start gap-3 p-4 bg-slate-50 border border-slate-200 dark:bg-zinc-900/50 dark:border-zinc-800 rounded-lg transition-colors">
             <Shield className="w-5 h-5 text-slate-500 dark:text-zinc-400 flex-shrink-0 transition-colors" />
             <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed transition-colors">
-              <strong>Non-custodial:</strong> kunci disimpan di local storage browser Anda,
-              tidak pernah masuk database ORACLE. Kunci hanya dikirim ke server saat Anda
-              menekan tombol eksekusi, dipakai sekali untuk memanggil bursa, lalu dibuang.
+              <strong>{t("settings.security.strong")}</strong> {t("settings.security.body")}
             </p>
           </div>
 
@@ -212,10 +217,10 @@ export default function SettingsPage() {
           <div className="flex items-start gap-3 p-4 bg-amber-500/5 border border-amber-500/30 rounded-lg transition-colors">
             <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
             <p className="text-xs text-amber-700 dark:text-amber-300/90 leading-relaxed transition-colors">
-              Buat API key bursa dengan izin <strong>Trade saja</strong> —{" "}
-              <strong>matikan Withdraw</strong> dan aktifkan IP whitelist bila tersedia.
-              Siapa pun yang mengakses browser ini bisa membaca local storage, jadi jangan
-              memakai kunci berizin penarikan dana.
+              {t("settings.warning.body", {
+                trade: t("settings.warning.trade"),
+                withdraw: t("settings.warning.withdraw"),
+              })}
             </p>
           </div>
         </section>
@@ -230,7 +235,7 @@ export default function SettingsPage() {
                 : "bg-slate-900 text-white hover:bg-slate-800 dark:bg-zinc-100 dark:text-black dark:hover:bg-white"
             }`}
           >
-            {isSaved ? <><Check className="w-4 h-4" /> Configuration Saved!</> : <><Save className="w-4 h-4" /> Save Configuration</>}
+            {isSaved ? <><Check className="w-4 h-4" /> {t("settings.saved")}</> : <><Save className="w-4 h-4" /> {t("settings.save")}</>}
           </button>
         </div>
         

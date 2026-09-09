@@ -9,6 +9,7 @@ import { useAccountId, fetchBillingStatus } from "@/lib/billing";
 import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
 import { EconomicCalendar } from "@/components/market-intel/economic-calendar";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n/context";
 
 const API_ROOT = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 const API_BASE = `${API_ROOT}/api/v1/market-intel`;
@@ -134,6 +135,7 @@ function useFeed<T>(path: string, intervalMs: number, accountId: string) {
 /* ------------------------------------------------------------------ */
 
 export default function MarketIntelligencePage() {
+  const t = useTranslation();
   const { accountId, ready } = useAccountId();
   const [tier, setTier] = useState<"free" | "pro">("free");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -158,17 +160,17 @@ export default function MarketIntelligencePage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400">
-            Market Intelligence
+            {t("intel.eyebrow")}
           </p>
           <h1 className="mt-2 text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50">
             <Globe className="w-8 h-8 text-emerald-500" />
-            {isPro ? "Analytical Terminal" : "Macro & On-Chain"}
+            {isPro ? t("intel.title.pro") : t("intel.title.free")}
           </h1>
         </div>
         {isPro && (
           <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            LIVE · PRO FEED
+            {t("intel.liveFeed")}
           </span>
         )}
       </div>
@@ -206,6 +208,7 @@ function AnalyticalTerminal({
   chain: OnChainItem[];
   loading: boolean;
 }) {
+  const t = useTranslation();
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -213,14 +216,14 @@ function AnalyticalTerminal({
         <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-[#0e1015]/70 backdrop-blur-md shadow-xl overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
             <Zap className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-sm font-semibold text-white">Alpha News Feed</h2>
+            <h2 className="text-sm font-semibold text-white">{t("intel.alphaNews")}</h2>
             <span className="ml-auto text-[10px] font-mono text-zinc-500">{news.length} headline · CryptoCompare / RSS live</span>
           </div>
           <div className="max-h-[560px] lg:max-h-[calc(100vh-24rem)] overflow-y-auto divide-y divide-white/5">
             {loading && news.length === 0 ? (
               <div className="p-8 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
             ) : news.length === 0 ? (
-              <p className="p-6 text-sm text-zinc-500">Belum ada headline.</p>
+              <p className="p-6 text-sm text-zinc-500">{t("intel.noHeadlines")}</p>
             ) : (
               news.map((n) => (
                 <a
@@ -266,13 +269,13 @@ function AnalyticalTerminal({
         <div className="lg:col-span-1 rounded-2xl border border-emerald-500/15 bg-black/90 shadow-xl overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2.5 border-b border-emerald-500/15 bg-black">
             <Radio className="w-3.5 h-3.5 text-emerald-400" />
-            <h2 className="text-xs font-mono font-semibold text-emerald-400 tracking-wide">oracle@onchain — stream</h2>
+            <h2 className="text-xs font-mono font-semibold text-emerald-400 tracking-wide">{t("intel.onchainStream")}</h2>
             <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_#10b981]" />
           </div>
           <div className="max-h-[560px] lg:max-h-[calc(100vh-24rem)] overflow-y-auto p-2 font-mono text-[11px] leading-relaxed bg-black/90">
             {chain.length === 0 ? (
               <p className="p-3 text-emerald-700 animate-pulse">
-                &gt; awaiting whale flow (&gt; $250k)<span className="animate-ping">_</span>
+                {t("intel.awaitingWhale")}<span className="animate-ping">_</span>
               </p>
             ) : (
               chain.map((c) => {
@@ -307,8 +310,8 @@ function AnalyticalTerminal({
       <div className="rounded-2xl border border-white/10 bg-[#0e1015] shadow-xl overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10 bg-[#0e1015]/70 backdrop-blur-md">
           <CalendarClock className="w-4 h-4 text-indigo-400" />
-          <h2 className="text-sm font-semibold text-white">Macro &amp; Government Events</h2>
-          <span className="ml-auto text-[10px] text-zinc-500">US CPI · The Fed · NFP · ECB · global</span>
+          <h2 className="text-sm font-semibold text-white">{t("intel.macroEvents")}</h2>
+          <span className="ml-auto text-[10px] text-zinc-500">{t("intel.macroSub")}</span>
         </div>
         <div className="h-[460px] bg-[#131722]">
           <EconomicCalendar />
@@ -333,6 +336,7 @@ function PaywallView({
   loading: boolean;
   onUpgrade: () => void;
 }) {
+  const t = useTranslation();
   const teaser = news.slice(0, 1);
   const blurredNews = news.slice(1);
 
@@ -341,7 +345,7 @@ function PaywallView({
       {/* Preview kecil — data lama, tajam */}
       <div>
         <h2 className="text-sm font-semibold text-slate-700 dark:text-zinc-300 mb-2 flex items-center gap-2">
-          <Globe className="w-4 h-4" /> Alpha News Feed <span className="text-[10px] text-zinc-500">(preview)</span>
+          <Globe className="w-4 h-4" /> {t("intel.alphaNews")} <span className="text-[10px] text-zinc-500">{t("intel.preview")}</span>
         </h2>
         {loading && teaser.length === 0 ? (
           <div className="p-6 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline" /></div>
@@ -406,18 +410,16 @@ function PaywallView({
               <Lock className="w-5 h-5 text-amber-400" />
             </div>
             <h3 className="text-base font-semibold text-white">
-              Upgrade ke PRO untuk Real-Time Alpha Feed &amp; Deep On-Chain Stream
+              {t("intel.paywall.title")}
             </h3>
             <p className="mt-2 text-sm text-zinc-400">
-              Live CryptoCompare / RSS news dengan thumbnail &amp; tag sentimen, terminal
-              whale-alert on-chain real-time (&gt; $500k), dan Kalender Ekonomi Makro
-              (US CPI, The Fed, NFP). FREE hanya melihat cuplikan berita.
+              {t("intel.paywall.body")}
             </p>
             <button
               onClick={onUpgrade}
               className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-amber-500 hover:from-emerald-400 hover:to-amber-400 py-2.5 px-4 font-semibold text-black shadow-lg transition"
             >
-              <Lock className="w-4 h-4" /> Upgrade ke PRO — $49/bln (USDC/USDT)
+              <Lock className="w-4 h-4" /> {t("intel.paywall.cta")}
             </button>
           </div>
         </div>

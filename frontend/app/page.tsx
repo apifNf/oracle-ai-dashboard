@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { formatFable5Decision } from "@/lib/fable5";
 import { getAccountIdNow } from "@/lib/billing";
+import { useTranslation } from "@/lib/i18n/context";
 
 // Backend FastAPI lokal (absolut). Konsisten dengan scanner / ai-chat.
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
@@ -22,11 +23,15 @@ const initialTickers = top15Symbols.map(sym => ({
 }));
 
 export default function DashboardPage() {
+  const t = useTranslation();
+  // "Scanning..." tetap dipakai sebagai SENTINEL state (tidak pernah tampil);
+  // yang ditampilkan selalu hasil t(), supaya ganti bahasa tidak merusak logika.
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [tickers, setTickers] = useState(initialTickers);
   const [activeSignals, setActiveSignals] = useState<number | string>("Scanning...");
+  const isScanning = activeSignals === "Scanning...";
   const [ledger, setLedger] = useState<{ count: number; balance: number } | null>(null);
 
   // 2. ENGINE PENYEDOT HARGA (Jalur VIP Binance Vision anti-blokir)
@@ -218,61 +223,66 @@ export default function DashboardPage() {
         
         <div>
           <p className="text-xs uppercase tracking-[0.3em] font-bold text-emerald-600 dark:text-emerald-500 mb-2 flex items-center gap-2">
-            <Activity className="w-4 h-4 animate-pulse" /> COMMAND CENTER
+            <Activity className="w-4 h-4 animate-pulse" /> {t("dashboard.eyebrow")}
           </p>
           <h1 className="text-3xl font-semibold text-slate-900 dark:text-white transition-colors duration-300">
-            Market Overview
+            {t("dashboard.title")}
           </h1>
         </div>
 
         {/* INTERACTIVE PREMIUM CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           <StatCard 
-            title="Macro Regime" 
-            value="Neutral" 
-            subtitle="Live liquidity & volatility index" 
+            title={t("dashboard.card.macro.title")}
+            value={t("dashboard.card.macro.value")}
+            subtitle={t("dashboard.card.macro.sub")}
             icon={<TrendingUp className="w-5 h-5 text-emerald-600 dark:text-emerald-500" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(16,185,129,0.15)] group-hover:border-emerald-500/50"
             href="/market-intelligence"
           />
           
           <StatCard 
-            title="Alpha Signals" 
-            value={activeSignals.toString()} 
-            subtitle={activeSignals === "Scanning..." ? "Processing top 30 assets..." : "High-probability setups detected"} 
-            icon={activeSignals === "Scanning..." ? <Radar className="w-5 h-5 text-amber-500 animate-spin-slow" /> : <Zap className="w-5 h-5 text-amber-500" />}
+            title={t("dashboard.card.alpha.title")}
+            value={isScanning ? t("dashboard.scanning") : activeSignals.toString()}
+            subtitle={isScanning ? t("dashboard.card.alpha.sub.scanning") : t("dashboard.card.alpha.sub.detected")}
+            loading={isScanning}
+            icon={isScanning ? <Radar className="w-5 h-5 text-amber-500 animate-spin-slow" /> : <Zap className="w-5 h-5 text-amber-500" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(245,158,11,0.15)] group-hover:border-amber-500/50"
             href="/scanner"
           />
           
           <StatCard 
-            title="Oracle Intelligence" 
-            value="Standby" 
-            subtitle="Neural network ready for analysis" 
+            title={t("dashboard.card.oracle.title")}
+            value={t("dashboard.card.oracle.value")}
+            subtitle={t("dashboard.card.oracle.sub")}
             icon={<BrainCircuit className="w-5 h-5 text-blue-600 dark:text-blue-500" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] group-hover:border-blue-500/50"
             href="/ai-chat"
           />
           <StatCard 
-            title="Global Sentiment" 
-            value="Greed" 
-            subtitle="Macro & on-chain data aggregated" 
+            title={t("dashboard.card.sentiment.title")}
+            value={t("dashboard.card.sentiment.value")}
+            subtitle={t("dashboard.card.sentiment.sub")}
             icon={<Globe className="w-5 h-5 text-indigo-600 dark:text-indigo-500" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(99,102,241,0.15)] group-hover:border-indigo-500/50"
             href="/market-intelligence"
           />
           <StatCard
-            title="Trade Ledger"
+            title={t("dashboard.card.ledger.title")}
             value={ledger ? ledger.count.toString() : "…"}
-            subtitle={ledger ? `Paper balance $${ledger.balance.toLocaleString("en-US", { maximumFractionDigits: 0 })} · executed trades` : "Loading ledger…"}
+            subtitle={ledger
+              ? t("dashboard.card.ledger.sub", {
+                  balance: ledger.balance.toLocaleString("en-US", { maximumFractionDigits: 0 }),
+                })
+              : t("dashboard.card.ledger.loading")}
             icon={<BookOpen className="w-5 h-5 text-purple-600 dark:text-purple-500" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] group-hover:border-purple-500/50"
             href="/journal"
           />
           <StatCard 
-            title="System Core" 
-            value="Optimal" 
-            subtitle="Latency: 14ms | Uptime: 99.9%" 
+            title={t("dashboard.card.system.title")}
+            value={t("dashboard.card.system.value")}
+            subtitle={t("dashboard.card.system.sub")}
             icon={<Settings2 className="w-5 h-5 text-slate-500 dark:text-slate-400" />}
             glowColor="group-hover:shadow-[0_0_20px_rgba(148,163,184,0.15)] group-hover:border-slate-400/50 dark:group-hover:border-slate-400/50"
             href="/settings"
@@ -285,7 +295,7 @@ export default function DashboardPage() {
           
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 transition-colors duration-300">
             <h2 className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-zinc-300">
-              <Terminal className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /> Quick Ask ORACLE
+              <Terminal className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /> {t("dashboard.quickAsk.title")}
             </h2>
           </div>
           
@@ -296,7 +306,7 @@ export default function DashboardPage() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 disabled={isLoading}
-                placeholder="Ask about macro events, BTC structure, or fetch a quick analysis..."
+                placeholder={t("dashboard.quickAsk.placeholder")}
                 className="w-full bg-transparent border-none py-4 px-4 text-[15px] text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-0 disabled:opacity-50"
               />
               <button 
@@ -314,7 +324,7 @@ export default function DashboardPage() {
                 {isLoading ? (
                   <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-500">
                     <BrainCircuit className="w-5 h-5 animate-pulse" />
-                    <span className="text-sm font-medium animate-pulse">ORACLE is processing request...</span>
+                    <span className="text-sm font-medium animate-pulse">{t("dashboard.quickAsk.processing")}</span>
                   </div>
                 ) : (
                   <div className="text-[15px] text-slate-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">
@@ -331,7 +341,7 @@ export default function DashboardPage() {
   );
 }
 
-function StatCard({ title, value, subtitle, icon, glowColor, href }: { title: string, value: string, subtitle: string, icon: any, glowColor: string, href: string }) {
+function StatCard({ title, value, subtitle, icon, glowColor, href, loading = false }: { title: string, value: string, subtitle: string, icon: any, glowColor: string, href: string, loading?: boolean }) {
   return (
     <Link href={href} className={`group block p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] hover:bg-slate-50 dark:hover:bg-[#151518] hover:-translate-y-1 transition-all duration-300 relative overflow-hidden cursor-pointer shadow-sm dark:shadow-none ${glowColor}`}>
       
@@ -347,7 +357,7 @@ function StatCard({ title, value, subtitle, icon, glowColor, href }: { title: st
       </div>
 
       <div className="relative z-10">
-        <h3 className={`text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-colors duration-300 ${value === "Scanning..." ? "text-xl animate-pulse" : ""}`}>
+        <h3 className={`text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-colors duration-300 ${loading ? "text-xl animate-pulse" : ""}`}>
           {value}
         </h3>
         <p className="text-[13px] text-slate-500 dark:text-zinc-500 mt-2 font-medium transition-colors duration-300">{subtitle}</p>

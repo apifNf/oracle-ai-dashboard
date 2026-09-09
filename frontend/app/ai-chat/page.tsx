@@ -8,6 +8,7 @@ import { formatFable5Decision } from "@/lib/fable5";
 import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
 import { proposalParamsFromDecision, extractProposalFromText, type ProposalParams } from "@/lib/trade";
 import { useAccountId, getAccountIdNow, fetchBillingStatus, type BillingStatus } from "@/lib/billing";
+import { useTranslation } from "@/lib/i18n/context";
 import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 
@@ -21,12 +22,18 @@ type Message = {
   proposalParams?: ProposalParams | null;
 };
 
+// Pesan pembuka disimpan sebagai SENTINEL, bukan teks jadi: kalau teksnya
+// dibekukan saat mount, mengganti bahasa tidak akan mengubahnya. Diterjemahkan
+// saat render.
+const INITIAL_MESSAGE_KEY = "__oracle_initial_message__";
+
 export default function AiChatPage() {
+  const t = useTranslation();
   const { accountId, email } = useAccountId();
   const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
 
   const [messages, setMessages] = useState<Message[]>([
-    { role: "oracle", content: "ORACLE System Online. What asset or market structure would you like to analyze today?" }
+    { role: "oracle", content: INITIAL_MESSAGE_KEY }
   ]);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -200,17 +207,17 @@ export default function AiChatPage() {
     <div className="flex flex-col h-[calc(100vh-6rem)] max-w-5xl mx-auto px-4 relative">
       <div className="py-6 border-b border-slate-200 dark:border-zinc-800/50 mb-4 sticky top-0 z-10 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-md">
         <p className="text-xs uppercase tracking-[0.3em] font-bold text-emerald-500 mb-2 flex items-center gap-2">
-          <Activity className="w-4 h-4 animate-pulse" /> Oracle Terminal
+          <Activity className="w-4 h-4 animate-pulse" /> {t("chat.eyebrow")}
         </p>
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50">
-            Analysis Workspace
+            {t("chat.title")}
           </h1>
           {tier === 'pro' && (
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full">
               <Zap className="w-3.5 h-3.5 text-amber-500" />
               <span className="text-[10px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-500">
-                Pro Alpha Active
+                {t("chat.proActive")}
               </span>
             </div>
           )}
@@ -254,7 +261,7 @@ export default function AiChatPage() {
                     />
                   </div>
                 )}
-                {msg.content}
+                {msg.content === INITIAL_MESSAGE_KEY ? t("chat.initialMessage") : msg.content}
               </div>
 
               {(() => {
@@ -289,7 +296,7 @@ export default function AiChatPage() {
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: "150ms" }}></span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: "300ms" }}></span>
               </div>
-              <span className="text-sm text-slate-500 dark:text-zinc-400 font-medium">Processing market data...</span>
+              <span className="text-sm text-slate-500 dark:text-zinc-400 font-medium">{t("chat.processing")}</span>
             </div>
           </div>
         )}
@@ -300,7 +307,7 @@ export default function AiChatPage() {
         {tier === "pro" ? (
           <div className="flex items-center justify-center gap-2 text-xs font-medium text-amber-500 mb-1">
             <Crown className="w-3.5 h-3.5" />
-            <span>PRO — Unlimited FABLE 5 prompts</span>
+            <span>{t("chat.proUnlimited")}</span>
           </div>
         ) : isLocked ? (
           <button
@@ -308,13 +315,13 @@ export default function AiChatPage() {
             className="mb-1 flex items-center justify-center gap-2 text-xs font-medium rounded-lg border border-amber-400/40 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 px-3 py-1.5 hover:border-amber-400 transition-colors"
           >
             <Crown className="w-3.5 h-3.5" />
-            Batas free (0/{billing?.prompt_limit ?? 3}) tercapai — Upgrade ke PRO ($49, USDC/USDT)
+            {t("chat.quotaReached", { limit: billing?.prompt_limit ?? 3 })}
           </button>
         ) : (
           <div className="flex items-center justify-center gap-2 text-xs font-medium text-slate-500 dark:text-zinc-400 mb-1">
             <Activity className="w-3.5 h-3.5" />
             <span>
-              Free Alpha Prompts:{" "}
+              {t("chat.freePrompts")}{" "}
               <strong className="text-emerald-500">
                 {remainingPrompts ?? "—"}/{billing?.prompt_limit ?? 3}
               </strong>
@@ -323,7 +330,7 @@ export default function AiChatPage() {
               onClick={() => setUpgradeOpen(true)}
               className="ml-1 text-amber-500 hover:text-amber-400 font-semibold"
             >
-              Upgrade
+              {t("chat.upgrade")}
             </button>
           </div>
         )}
@@ -350,8 +357,8 @@ export default function AiChatPage() {
               <div className="flex items-center gap-3 px-6 py-3 bg-white dark:bg-[#111113] rounded-xl border border-amber-500/30 shadow-2xl">
                 <Lock className="w-5 h-5 text-amber-500" />
                 <div className="flex flex-col text-left">
-                  <span className="text-sm font-bold tracking-tight text-slate-900 dark:text-white uppercase">Pro Alpha Required</span>
-                  <span className="text-[10px] text-slate-500 dark:text-zinc-400">Klik untuk upgrade — unlimited Oracle AI + FABLE 5</span>
+                  <span className="text-sm font-bold tracking-tight text-slate-900 dark:text-white uppercase">{t("chat.locked.title")}</span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-400">{t("chat.locked.subtitle")}</span>
                 </div>
               </div>
             </button>
@@ -383,7 +390,7 @@ export default function AiChatPage() {
               type="text" 
               value={prompt} 
               onChange={(e) => setPrompt(e.target.value)} 
-              placeholder={isLocked ? "Oracle AI is locked..." : "Ask about BTC structure, funding rates, or attach a chart..."}
+              placeholder={isLocked ? t("chat.placeholderLocked") : t("chat.placeholder")}
               className="flex-1 bg-transparent border-none py-3 px-2 text-[15px] text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-0 dark:text-white dark:placeholder:text-zinc-500"
               disabled={loading || isLocked}
             />
