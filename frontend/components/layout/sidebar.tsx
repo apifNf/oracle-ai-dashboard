@@ -143,8 +143,12 @@ export function Sidebar() {
                   {user.email}
                 </span>
                 {tier === 'pro' ? (
-                  <span className="mt-0.5 inline-flex items-center gap-1 self-start rounded px-1.5 py-0.5 text-[10px] font-bold tracking-widest uppercase text-amber-300 bg-gradient-to-r from-emerald-500/15 to-amber-500/15 border border-amber-400/40 shadow-[0_0_12px_rgba(245,158,11,0.35)]">
-                    <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                  <span
+                    className="mt-0.5 inline-flex items-center gap-1 self-start rounded px-1.5 py-0.5 text-[10px] font-bold tracking-widest uppercase transition-colors
+                      text-emerald-700 bg-emerald-500/10 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.25)]
+                      dark:text-amber-300 dark:bg-gradient-to-r dark:from-emerald-500/15 dark:to-amber-500/15 dark:border-amber-400/40 dark:shadow-[0_0_12px_rgba(245,158,11,0.35)]"
+                  >
+                    <span className="w-1 h-1 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
                     {t("sidebar.proTier")}
                   </span>
                 ) : (

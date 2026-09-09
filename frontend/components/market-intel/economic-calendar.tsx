@@ -1,20 +1,24 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTheme } from "next-themes";
 
 /**
- * TradingView Economic Calendar (Events) Widget — HARD-FORCED DARK.
+ * TradingView Economic Calendar (Events) Widget — SINKRON TEMA.
  *
- * HARD-FIX:
- *  - config JSON: "colorTheme": "dark" (bukan "theme"), "isTransparent": false
- *    -> TradingView dipaksa merender background dark bawaannya (aman, pasti gelap).
+ *  - config JSON: "colorTheme" (bukan "theme") mengikuti Light/Dark mode aplikasi;
+ *    "isTransparent": false supaya TradingView merender background bawaannya
+ *    (putih untuk light, #131722 untuk dark) — bukan transparan yang bocor.
  *  - DOM cleansing: kontainer dikosongkan (innerHTML = "") lalu subtree
- *    .tradingview-widget-container DIBUAT ULANG total setiap mount, supaya tidak
- *    ada iframe/tema lama yang tersangkut cache DOM saat React remount / HMR.
+ *    .tradingview-widget-container DIBUAT ULANG total setiap kali tema berubah,
+ *    supaya tidak ada iframe bertema lama yang tersangkut cache DOM.
  *  - src: https://s3.tradingview.com/external-embedding/embed-widget-events.js
  */
 export function EconomicCalendar() {
   const hostRef = useRef<HTMLDivElement>(null);
+  const { resolvedTheme } = useTheme();
+  const isLight = resolvedTheme === "light";
+  const surface = isLight ? "#ffffff" : "#131722";
 
   useEffect(() => {
     const host = hostRef.current;
@@ -28,7 +32,7 @@ export function EconomicCalendar() {
     container.className = "tradingview-widget-container";
     container.style.height = "100%";
     container.style.width = "100%";
-    container.style.backgroundColor = "#131722"; // dark bawaan TradingView
+    container.style.backgroundColor = surface;
 
     const widget = document.createElement("div");
     widget.className = "tradingview-widget-container__widget";
@@ -42,14 +46,14 @@ export function EconomicCalendar() {
       '<a href="https://www.tradingview.com/economic-calendar/" rel="noopener nofollow" target="_blank" style="color:#787b86;font-size:11px;">Economic calendar by TradingView</a>';
     container.appendChild(copyright);
 
-    // 3. Inject script dengan config JSON dark.
+    // 3. Inject script dengan config JSON bertema sesuai mode aktif.
     const script = document.createElement("script");
     script.src =
       "https://s3.tradingview.com/external-embedding/embed-widget-events.js";
     script.type = "text/javascript";
     script.async = true;
     script.innerHTML = JSON.stringify({
-      colorTheme: "dark",
+      colorTheme: isLight ? "light" : "dark",
       isTransparent: false,
       locale: "en",
       countryFilter: "us,eu,gb,jp,cn,de,ca,au",
@@ -64,13 +68,13 @@ export function EconomicCalendar() {
     return () => {
       host.innerHTML = "";
     };
-  }, []);
+  }, [isLight, surface]);
 
   return (
     <div
       ref={hostRef}
-      className="h-full w-full [color-scheme:dark]"
-      style={{ height: "100%", width: "100%", backgroundColor: "#131722" }}
+      className={isLight ? "h-full w-full [color-scheme:light]" : "h-full w-full [color-scheme:dark]"}
+      style={{ height: "100%", width: "100%", backgroundColor: surface }}
     />
   );
 }

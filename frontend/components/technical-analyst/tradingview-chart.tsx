@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTheme } from "next-themes";
 
 type Props = {
   /** Symbol TradingView, mis. "BINANCE:BTCUSDT". */
@@ -12,16 +13,20 @@ type Props = {
 /**
  * TradingView Advanced Real-Time Chart — embed resmi.
  * Dimuat sepenuhnya di client (useEffect) supaya tidak memicu error SSR/hydration.
- * Widget dibangun ulang setiap kali `symbol` berubah.
+ * Widget dibangun ulang setiap kali `symbol`, `interval`, ATAU tema berubah —
+ * `theme`/`backgroundColor`/`gridColor` widget mengikuti Light/Dark mode aplikasi.
  */
 export function TradingViewChart({ symbol, interval = "60" }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { resolvedTheme } = useTheme();
+  const isLight = resolvedTheme === "light";
 
   useEffect(() => {
     const host = containerRef.current;
     if (!host) return;
 
-    // Bersihkan instance sebelumnya.
+    // Bersihkan instance sebelumnya (juga saat tema berubah, supaya iframe lama
+    // yang masih bertema warna sebelumnya tidak tersangkut).
     host.innerHTML = "";
 
     const widget = document.createElement("div");
@@ -40,7 +45,7 @@ export function TradingViewChart({ symbol, interval = "60" }: Props) {
       symbol,
       interval,
       timezone: "Etc/UTC",
-      theme: "dark",
+      theme: isLight ? "light" : "dark",
       style: "1", // candles
       locale: "en",
       enable_publishing: false,
@@ -50,8 +55,8 @@ export function TradingViewChart({ symbol, interval = "60" }: Props) {
       allow_symbol_change: true,
       details: true,
       calendar: false,
-      backgroundColor: "rgba(10, 10, 10, 1)",
-      gridColor: "rgba(255, 255, 255, 0.06)",
+      backgroundColor: isLight ? "rgba(255, 255, 255, 1)" : "rgba(10, 10, 10, 1)",
+      gridColor: isLight ? "rgba(15, 23, 42, 0.06)" : "rgba(255, 255, 255, 0.06)",
       support_host: "https://www.tradingview.com",
     });
     host.appendChild(script);
@@ -59,7 +64,7 @@ export function TradingViewChart({ symbol, interval = "60" }: Props) {
     return () => {
       host.innerHTML = "";
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, isLight]);
 
   return (
     <div
