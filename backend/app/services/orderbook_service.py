@@ -39,7 +39,16 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["OrderBookService", "OrderBookError"]
 
-BYBIT_ORDERBOOK_URL = "https://api.bybit.com/v5/market/orderbook"
+# Rantai sumber upstream, dicoba berurutan. api.bybit.com sering membalas
+# 403/451 dari IP datacenter AS (Render) — sama seperti kasus onchain_worker.
+# api.bytick.com adalah domain MIRROR RESMI Bybit dengan bentuk respons identik;
+# OKX dipakai sebagai cadangan lintas-bursa (bentuk respons berbeda, di-parse
+# terpisah). Semua publik, tanpa API key.
+BYBIT_ORDERBOOK_HOSTS = (
+    "https://api.bybit.com/v5/market/orderbook",
+    "https://api.bytick.com/v5/market/orderbook",
+)
+OKX_ORDERBOOK_URL = "https://www.okx.com/api/v5/market/books"
 REQUEST_TIMEOUT = 6.0
 
 # Cache TTL pendek: cukup untuk meredam polling 1-2 detik dari banyak klien,
@@ -191,86 +200,107 @@ class OrderBookService:
             "market_type": market_type,
             "category": category,
             "depth": depth,
-            "source": "bybit",
         }
-        try:
-            response = await self._get_client().get(
-                BYBIT_ORDERBOOK_URL,
-                params={"category": category, "symbol": sym, "limit": depth},
-            )
-            response.raise_for_status()
-            body = response.json()
-        except Exception as exc:
-            logger.warning(
-                "Order book %s (%s) gagal: %s", sym, category, type(exc).__name__
-            )
+
+        errors: list[str] = []
+        for name, fetch in (
+            ("bybit", lambda: self._src_bybit(BYBIT_ORDERBOOK_HOSTS[0], sym, category, depth)),
+            ("bytick", lambda: self._src_bybit(BYBIT_ORDERBOOK_HOSTS[1], sym, category, depth)),
+            ("okx", lambda: self._src_okx(sym, category, depth)),
+        ):
+            try:
+                bids, asks, ts = await fetch()
+            except Exception as exc:
+                errors.append(f"{name}:{type(exc).__name__}")
+                logger.warning(
+                    "Order book %s (%s) via %s gagal: %s",
+                    sym, category, name, type(exc).__name__,
+                )
+                continue
+
+            if not bids or not asks:
+                errors.append(f"{name}:empty")
+                continue
+
+            if name != "bybit":
+                logger.info(
+                    "Order book %s diambil dari sumber cadangan '%s' (bybit diblokir?).",
+                    sym, name,
+                )
+
+            best_bid = bids[0]["price"]
+            best_ask = asks[0]["price"]
+            spread = best_ask - best_bid
+            mid = (best_ask + best_bid) / 2
+
             return {
                 **base,
-                "status": "unavailable",
-                "bids": [], "asks": [],
-                "as_of": None, "mid_price": None, "spread": None,
-                "spread_pct": None, "max_total": None,
-                "error": {
-                    "code": "upstream_failed",
-                    "message": f"Order book {sym} tidak bisa diambil ({type(exc).__name__}).",
-                },
+                "source": name,
+                "status": "ok",
+                "as_of": (
+                    datetime.fromtimestamp(ts / 1000, tz=timezone.utc).isoformat()
+                    if ts else datetime.now(tz=timezone.utc).isoformat()
+                ),
+                "bids": bids,
+                "asks": asks,
+                "best_bid": best_bid,
+                "best_ask": best_ask,
+                "mid_price": round(mid, 8),
+                "spread": round(spread, 8),
+                "spread_pct": round((spread / mid) * 100, 4) if mid else None,
+                # Dipakai frontend untuk lebar depth bar — dihitung sekali di sini
+                # supaya tiap render tidak menyapu ulang kedua sisi buku.
+                "max_total": max(bids[-1]["total"], asks[-1]["total"]),
+                "error": None,
             }
 
-        if str(body.get("retCode", "0")) != "0":
-            return {
-                **base,
-                "status": "unavailable",
-                "bids": [], "asks": [],
-                "as_of": None, "mid_price": None, "spread": None,
-                "spread_pct": None, "max_total": None,
-                "error": {
-                    "code": "rejected",
-                    "message": str(body.get("retMsg") or "Bursa menolak permintaan."),
-                },
-            }
-
-        result = body.get("result") or {}
-        bids = _levels(result.get("b"))   # b = bids, harga menurun
-        asks = _levels(result.get("a"))   # a = asks, harga menaik
-
-        if not bids or not asks:
-            return {
-                **base,
-                "status": "unavailable",
-                "bids": [], "asks": [],
-                "as_of": None, "mid_price": None, "spread": None,
-                "spread_pct": None, "max_total": None,
-                "error": {
-                    "code": "empty_book",
-                    "message": f"Bursa tidak mengembalikan level untuk {sym}.",
-                },
-            }
-
-        best_bid = bids[0]["price"]
-        best_ask = asks[0]["price"]
-        spread = best_ask - best_bid
-        mid = (best_ask + best_bid) / 2
-        ts = _to_float(result.get("ts"))
-
+        # Sesuai prinsip proyek: bursa gagal -> "unavailable" dengan alasan,
+        # BUKAN bids/asks kosong yang terlihat seperti pasar sepi.
         return {
             **base,
-            "status": "ok",
-            "as_of": (
-                datetime.fromtimestamp(ts / 1000, tz=timezone.utc).isoformat()
-                if ts else datetime.now(tz=timezone.utc).isoformat()
-            ),
-            "bids": bids,
-            "asks": asks,
-            "best_bid": best_bid,
-            "best_ask": best_ask,
-            "mid_price": round(mid, 8),
-            "spread": round(spread, 8),
-            "spread_pct": round((spread / mid) * 100, 4) if mid else None,
-            # Dipakai frontend untuk lebar depth bar — dihitung sekali di sini
-            # supaya tiap render tidak menyapu ulang kedua sisi buku.
-            "max_total": max(bids[-1]["total"], asks[-1]["total"]),
-            "error": None,
+            "source": "bybit",
+            "status": "unavailable",
+            "bids": [], "asks": [],
+            "as_of": None, "mid_price": None, "spread": None,
+            "spread_pct": None, "max_total": None,
+            "error": {
+                "code": "upstream_failed",
+                "message": f"Order book {sym} tidak bisa diambil ({'; '.join(errors)}).",
+            },
         }
+
+    async def _src_bybit(
+        self, url: str, sym: str, category: str, depth: int
+    ) -> tuple[list[dict[str, float]], list[dict[str, float]], float | None]:
+        """Bybit v5 /market/orderbook (host utama ATAU mirror bytick — bentuk sama)."""
+        resp = await self._get_client().get(
+            url, params={"category": category, "symbol": sym, "limit": depth}
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if str(body.get("retCode", "0")) != "0":
+            raise OrderBookError(f"retCode={body.get('retCode')} {body.get('retMsg')}")
+        result = body.get("result") or {}
+        # b = bids (harga menurun), a = asks (harga menaik).
+        return _levels(result.get("b")), _levels(result.get("a")), _to_float(result.get("ts"))
+
+    async def _src_okx(
+        self, sym: str, category: str, depth: int
+    ) -> tuple[list[dict[str, float]], list[dict[str, float]], float | None]:
+        """OKX /api/v5/market/books — cadangan lintas-bursa, ramah IP AS."""
+        resp = await self._get_client().get(
+            OKX_ORDERBOOK_URL, params={"instId": _okx_inst(sym, category), "sz": depth}
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if str(body.get("code", "0")) != "0":
+            raise OrderBookError(f"code={body.get('code')} {body.get('msg')}")
+        rows = body.get("data") or []
+        if not rows:
+            return [], [], None
+        row = rows[0]
+        # OKX row: [price, size, deprecated, num_orders] — _levels hanya baca 2 kolom pertama.
+        return _levels(row.get("bids")), _levels(row.get("asks")), _to_float(row.get("ts"))
 
 
 def _levels(raw: Any) -> list[dict[str, float]]:
@@ -300,4 +330,13 @@ def _pretty_pair(symbol: str) -> str:
     for quote in ("USDT", "USDC", "USD"):
         if symbol.endswith(quote) and len(symbol) > len(quote):
             return f"{symbol[: -len(quote)]}/{quote}"
+    return symbol
+
+
+def _okx_inst(symbol: str, category: str) -> str:
+    """'BTCUSDT' -> 'BTC-USDT' (spot) / 'BTC-USDT-SWAP' (linear perpetual)."""
+    for quote in ("USDT", "USDC", "USD"):
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            pair = f"{symbol[: -len(quote)]}-{quote}"
+            return f"{pair}-SWAP" if category == "linear" else pair
     return symbol

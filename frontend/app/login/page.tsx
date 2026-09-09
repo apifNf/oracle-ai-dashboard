@@ -92,7 +92,7 @@ export default function LoginPage() {
             <Activity className="w-8 h-8 text-emerald-600 dark:text-emerald-500 relative z-10" />
           </div>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight mb-2 transition-colors duration-300">ORACLE Core</h1>
-          <p className="text-slate-500 dark:text-zinc-400 text-sm transition-colors duration-300">Institutional Crypto Intelligence</p>
+          <p className="text-slate-500 dark:text-zinc-400 text-sm transition-colors duration-300">Algorithmic Crypto Intelligence</p>
         </div>
 
         {/* Auth Card */}
