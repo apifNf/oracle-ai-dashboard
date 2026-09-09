@@ -6,18 +6,23 @@ import { usePathname, useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { Bot, Gauge, MessageSquareText, NotebookPen, Settings, Globe, User, LogOut, Activity, CandlestickChart } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/dictionaries";
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: Gauge, protected: true },
-  { href: "/scanner", label: "Scanner", icon: Bot, protected: true },
-  { href: "/ai-chat", label: "AI Chat", icon: MessageSquareText, protected: true },
-  { href: "/market-intelligence", label: "Market Intelligence", icon: Globe, protected: false },
-  { href: "/journal", label: "Journal", icon: NotebookPen, protected: true },
-  { href: "/technical-analyst", label: "Technical Analyst", icon: CandlestickChart, protected: true },
-  { href: "/settings", label: "Settings", icon: Settings, protected: true }
+// Label disimpan sebagai kunci kamus, bukan teks jadi — supaya bahasa bisa
+// berganti tanpa remount sidebar.
+const navItems: { href: string; labelKey: TranslationKey; icon: any; protected: boolean }[] = [
+  { href: "/", labelKey: "nav.dashboard", icon: Gauge, protected: true },
+  { href: "/scanner", labelKey: "nav.scanner", icon: Bot, protected: true },
+  { href: "/ai-chat", labelKey: "nav.aiChat", icon: MessageSquareText, protected: true },
+  { href: "/market-intelligence", labelKey: "nav.marketIntelligence", icon: Globe, protected: false },
+  { href: "/journal", labelKey: "nav.journal", icon: NotebookPen, protected: true },
+  { href: "/technical-analyst", labelKey: "nav.technicalAnalyst", icon: CandlestickChart, protected: true },
+  { href: "/settings", labelKey: "nav.settings", icon: Settings, protected: true }
 ];
 
 export function Sidebar() {
+  const t = useTranslation();
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -101,7 +106,7 @@ export function Sidebar() {
             ORACLE
           </Link>
           <span className="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-400 md:mt-1 md:block transition-colors duration-500">
-            Crypto Analyst
+            {t("sidebar.subtitle")}
           </span>
         </div>
         
@@ -121,7 +126,7 @@ export function Sidebar() {
                 )}
               >
                 <item.icon className="h-4 w-4" />
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             );
           })}
@@ -140,11 +145,11 @@ export function Sidebar() {
                 {tier === 'pro' ? (
                   <span className="mt-0.5 inline-flex items-center gap-1 self-start rounded px-1.5 py-0.5 text-[10px] font-bold tracking-widest uppercase text-amber-300 bg-gradient-to-r from-emerald-500/15 to-amber-500/15 border border-amber-400/40 shadow-[0_0_12px_rgba(245,158,11,0.35)]">
                     <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-                    PRO TIER
+                    {t("sidebar.proTier")}
                   </span>
                 ) : (
                   <span className="text-[10px] font-bold tracking-widest uppercase mt-0.5 text-slate-500 dark:text-zinc-500">
-                    FREE TIER
+                    {t("sidebar.freeTier")}
                   </span>
                 )}
               </div>
@@ -152,7 +157,7 @@ export function Sidebar() {
             <button 
               onClick={handleSignOut}
               className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all shrink-0"
-              title="Sign Out"
+              title={t("sidebar.signOut")}
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -170,9 +175,9 @@ export function Sidebar() {
                 <Activity className="w-6 h-6 text-emerald-500" />
               </div>
               <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-white tracking-tight">Authentication Required</h2>
+                <h2 className="text-xl font-semibold text-white tracking-tight">{t("auth.title")}</h2>
                 <p className="text-sm text-zinc-400 leading-relaxed">
-                  Please log in to access this module and unlock all ORACLE features.
+                  {t("auth.description")}
                 </p>
               </div>
               <div className="pt-4 w-full flex gap-3">
@@ -180,7 +185,7 @@ export function Sidebar() {
                   onClick={() => setShowModal(false)}
                   className="flex-1 px-4 py-2.5 text-sm font-medium text-zinc-500 hover:text-white transition-colors"
                 >
-                  Cancel
+                  {t("auth.cancel")}
                 </button>
                 <button 
                   onClick={() => {
@@ -189,7 +194,7 @@ export function Sidebar() {
                   }}
                   className="flex-1 px-4 py-2.5 text-sm font-medium text-zinc-900 bg-zinc-200 hover:bg-white rounded-lg transition-colors flex items-center justify-center"
                 >
-                  Continue to Login
+                  {t("auth.continue")}
                 </button>
               </div>
             </div>

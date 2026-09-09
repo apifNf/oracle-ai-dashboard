@@ -1,5 +1,6 @@
 ﻿import { Sidebar } from "@/components/layout/sidebar";
 import ThemeToggle from "@/components/layout/theme-toggle";
+import LanguageToggle from "@/components/layout/language-toggle";
 
 export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -9,7 +10,8 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
         <div className="mx-auto max-w-7xl w-full flex-1 flex flex-col">
           
           {/* Topbar: Diberi padding-top agar sejajar/balance dengan judul halaman */}
-          <div className="w-full flex justify-end pt-2 pb-2 mb-6">
+          <div className="w-full flex items-center justify-end gap-3 pt-2 pb-2 mb-6">
+            <LanguageToggle />
             <ThemeToggle />
           </div>
           

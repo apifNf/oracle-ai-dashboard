@@ -9,6 +9,8 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { TradeProposalTicket } from "@/components/trade/trade-proposal-ticket";
 import { DetailChart } from "@/components/charts/detail-chart";
+import { TradingStepsBanner } from "@/components/onboarding/trading-steps-banner";
+import { useTranslation } from "@/lib/i18n/context";
 import { proposalParamsFromSignal } from "@/lib/trade";
 import { useAccountId, fetchBillingStatus, type BillingStatus } from "@/lib/billing";
 import { UpgradeToProModal } from "@/components/billing/upgrade-to-pro-modal";
@@ -231,6 +233,7 @@ function StatusPill({ status, ageSeconds }: { status: AssetStatus; ageSeconds: n
 /* ================================================================== */
 
 export default function ScannerPage() {
+  const t = useTranslation();
   const { resolvedTheme } = useTheme();
   const { accountId, email, ready } = useAccountId();
 
@@ -366,17 +369,23 @@ export default function ScannerPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400">
-            Scanner
+            {t("scanner.eyebrow")}
           </p>
           <h1 className="mt-2 text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50">
-            <Activity className="w-8 h-8 text-emerald-500" /> Live Signal Scanner
+            <Activity className="w-8 h-8 text-emerald-500" /> {t("scanner.title")}
           </h1>
           {snapshot && (
             <p className="mt-1.5 text-xs text-slate-500 dark:text-zinc-500 font-mono">
-              {snapshot.counts.ok}/{snapshot.counts.total} aset dengan data lengkap
-              {snapshot.signals[0]?.rule_set && ` · aturan ${snapshot.signals[0].rule_set}`}
+              {t("scanner.assetsComplete", {
+                ok: snapshot.counts.ok,
+                total: snapshot.counts.total,
+              })}
+              {snapshot.signals[0]?.rule_set &&
+                ` · ${t("scanner.ruleSet", { rule: snapshot.signals[0].rule_set })}`}
               {snapshot.indicators_age_seconds !== null &&
-                ` · indikator ${ageText(snapshot.indicators_age_seconds)}`}
+                ` · ${t("scanner.indicatorsAge", {
+                  age: ageText(snapshot.indicators_age_seconds),
+                })}`}
             </p>
           )}
         </div>
@@ -387,7 +396,7 @@ export default function ScannerPage() {
               onClick={reconnectNow}
               className="flex items-center gap-2 px-4 py-2 border rounded-lg font-medium text-sm bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-[#09090b] dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 transition-colors"
             >
-              <RefreshCw className="w-4 h-4" /> Sambungkan ulang
+              <RefreshCw className="w-4 h-4" /> {t("scanner.reconnect")}
             </button>
           )}
 
@@ -402,19 +411,22 @@ export default function ScannerPage() {
             )}
           >
             {socketState === "connected" && !snapshotStale ? (
-              <><Wifi className="w-4 h-4" /><span className="text-sm">Live Stream</span></>
+              <><Wifi className="w-4 h-4" /><span className="text-sm">{t("scanner.status.live")}</span></>
             ) : socketState === "connected" && snapshotStale ? (
-              <><Clock className="w-4 h-4" /><span className="text-sm">Data tertunda</span></>
+              <><Clock className="w-4 h-4" /><span className="text-sm">{t("scanner.status.delayed")}</span></>
             ) : socketState === "reconnecting" ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">Menyambung ulang…</span></>
+              <><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">{t("scanner.status.reconnecting")}</span></>
             ) : socketState === "connecting" ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">Menyambung…</span></>
+              <><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">{t("scanner.status.connecting")}</span></>
             ) : (
-              <><WifiOff className="w-4 h-4" /><span className="text-sm">Terputus</span></>
+              <><WifiOff className="w-4 h-4" /><span className="text-sm">{t("scanner.status.disconnected")}</span></>
             )}
           </div>
         </div>
       </div>
+
+      {/* Onboarding: 3 langkah cara trading (bisa ditutup permanen) */}
+      <TradingStepsBanner />
 
       {/* Disclaimer — statis, tidak bisa ditutup */}
       <RiskDisclaimer text={snapshot?.disclaimer} />
@@ -425,11 +437,12 @@ export default function ScannerPage() {
           <WifiOff className="w-5 h-5 shrink-0 text-red-600 dark:text-red-500 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-red-900 dark:text-red-400">
-              Aliran harga bursa terputus
+              {t("scanner.streamDown.title")}
             </p>
             <p className="text-xs text-red-800/90 dark:text-red-300/80 mt-1">
-              Server sedang menyambung ulang ({snapshot.stream.consecutive_failures} percobaan).
-              Angka di bawah adalah data terakhir yang diterima, bukan harga saat ini.
+              {t("scanner.streamDown.body", {
+                attempts: snapshot.stream.consecutive_failures,
+              })}
             </p>
           </div>
         </div>
@@ -455,11 +468,11 @@ export default function ScannerPage() {
       ) : signals.length === 0 ? (
         <div className="p-12 border border-dashed border-slate-300 bg-slate-50 dark:border-zinc-800 dark:bg-transparent rounded-xl text-slate-500 dark:text-zinc-500 text-center flex flex-col items-center">
           <WifiOff className="w-12 h-12 mb-4 opacity-30" />
-          <p className="font-medium text-slate-700 dark:text-zinc-300">Tidak ada data scanner</p>
+          <p className="font-medium text-slate-700 dark:text-zinc-300">{t("scanner.empty.title")}</p>
           <p className="text-sm mt-1">
             {socketState === "connected"
-              ? "Server terhubung tetapi belum mengirim aset apa pun."
-              : "Koneksi ke server terputus."}
+              ? t("scanner.empty.connected")
+              : t("scanner.empty.disconnected")}
           </p>
         </div>
       ) : (
@@ -592,7 +605,7 @@ export default function ScannerPage() {
 
                       {!isOpen && (
                         <p className="text-[10px] text-slate-400 dark:text-zinc-600 pt-1">
-                          Klik kartu untuk melihat candle
+                          {t("scanner.openCard")}
                         </p>
                       )}
 

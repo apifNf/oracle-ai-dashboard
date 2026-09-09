@@ -2,6 +2,7 @@
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
 import { ThemeProvider } from "next-themes";
+import { I18nProvider } from "@/lib/i18n/context";
 
 export const metadata: Metadata = {
   title: "ORACLE | Platform AI Trading Crypto",
@@ -106,20 +107,22 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         />
         
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={true}>
-          <AppShell>
-            <div className="flex flex-col h-full min-h-[calc(100vh-4rem)]">
-              <div className="flex-1">
-                {children}
-              </div>
+          <I18nProvider>
+            <AppShell>
+              <div className="flex flex-col h-full min-h-[calc(100vh-4rem)]">
+                <div className="flex-1">
+                  {children}
+                </div>
               
-              {/* FOOTER */}
-              <footer className="w-full mt-auto pt-6 pb-3 flex justify-end items-center pr-5">
-                <p className="text-xs font-medium text-zinc-600 tracking-wide">
-                  © 2026 ORACLE. All Rights Reserved. | Created by <span className="text-slate-600 dark:text-zinc-400 font-bold hover:!text-emerald-500 dark:hover:!text-emerald-400 transition-colors cursor-pointer">A-Tech Labs</span>
-                </p>
-              </footer>
-            </div>
-          </AppShell>
+                {/* FOOTER */}
+                <footer className="w-full mt-auto pt-6 pb-3 flex justify-end items-center pr-5">
+                  <p className="text-xs font-medium text-zinc-600 tracking-wide">
+                    © 2026 ORACLE. All Rights Reserved. | Created by <span className="text-slate-600 dark:text-zinc-400 font-bold hover:!text-emerald-500 dark:hover:!text-emerald-400 transition-colors cursor-pointer">A-Tech Labs</span>
+                  </p>
+                </footer>
+              </div>
+            </AppShell>
+          </I18nProvider>
         </ThemeProvider>
       </body>
     </html>
