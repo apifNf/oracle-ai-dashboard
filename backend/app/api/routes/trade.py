@@ -71,6 +71,17 @@ class CloseRequest(BaseModel):
     exit_price: float | None = None
 
 
+class ExchangeAccountRequest(BaseModel):
+    # Snapshot READ-ONLY akun bursa user (saldo + posisi) untuk "Smart Journal".
+    # Kredensial dikirim per-request dari browser dan tidak disimpan server —
+    # sama seperti /execute.
+    exchange_id: str | None = None
+    market_type: Literal["spot", "futures"] | None = None
+    api_key: str | None = Field(default=None, repr=False)
+    secret_key: str | None = Field(default=None, repr=False)
+    passphrase: str | None = Field(default=None, repr=False)
+
+
 # --------------------------------------------------------------------------- #
 # Helper
 # --------------------------------------------------------------------------- #
@@ -285,6 +296,62 @@ def _resolve_exchange_keys(exchange_id: str, body: ExecuteRequest) -> Any:
         server_passphrase=server_pass,
         allow_server_fallback=settings.exchange_allow_server_keys,
     )
+
+
+@router.post("/exchange-account")
+async def trade_exchange_account(body: ExchangeAccountRequest) -> dict[str, Any]:
+    """
+    Saldo + posisi terbuka dari akun bursa milik user (READ-ONLY).
+
+    Dipakai halaman Journal untuk "Smart Balance": kalau user sudah menyimpan
+    kunci API-nya, tampilkan saldo stablecoin ASLI dari bursa; kalau belum,
+    frontend jatuh ke "Virtual Balance $10,000".
+
+    TIDAK di-gate oleh TRADE_LIVE_ENABLED (tidak menempatkan order). Kredensial
+    user diprioritaskan; `.env` server hanya fallback bila
+    EXCHANGE_ALLOW_SERVER_KEYS masih true.
+    """
+    from app.api.execute_trade import (
+        MissingCredentials,
+        fetch_exchange_account,
+        redact,
+        resolve_credentials,
+    )
+
+    exchange_id = (body.exchange_id or settings.default_exchange_id).strip().lower()
+    market_type = (body.market_type or settings.default_market_type).strip().lower()
+
+    server_key = settings.exchange_api_key
+    server_secret = settings.exchange_api_secret
+    server_pass = settings.exchange_api_password
+    if not (server_key and server_secret) and exchange_id == "binance":
+        server_key, server_secret, server_pass = (
+            settings.binance_api_key, settings.binance_api_secret, None
+        )
+
+    try:
+        creds = resolve_credentials(
+            exchange_id,
+            user_key=body.api_key,
+            user_secret=body.secret_key,
+            user_passphrase=body.passphrase,
+            server_key=server_key,
+            server_secret=server_secret,
+            server_passphrase=server_pass,
+            allow_server_fallback=settings.exchange_allow_server_keys,
+        )
+    except MissingCredentials as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+    try:
+        return await asyncio.to_thread(
+            fetch_exchange_account, exchange_id, market_type, credentials=creds
+        )
+    except Exception as exc:  # jaring pengaman — helper sudah menelan errornya
+        detail = redact(exc, body.api_key, body.secret_key, body.passphrase)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Snapshot bursa gagal: {type(exc).__name__}: {detail}"
+        )
 
 
 @router.post("/close")

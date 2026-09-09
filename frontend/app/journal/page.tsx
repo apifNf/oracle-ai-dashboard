@@ -3,19 +3,64 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2, Wallet } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
-import { fetchJournal, fetchAccount, fetchLivePrices, type TradeRecord } from "@/lib/trade";
+import {
+  fetchJournal, fetchAccount, fetchLivePrices, fetchExchangeAccount,
+  type TradeRecord, type ExchangeAccount,
+} from "@/lib/trade";
+import {
+  getPaperTrades, syncPaperTrades, closePaperTrade,
+  PAPER_LEDGER_EVENT, type PaperTrade,
+} from "@/lib/paper-ledger";
+import { buildUnifiedLedger, type LedgerRow } from "@/lib/ledger";
+import { getWorkspace, credentialsStatus } from "@/lib/workspace";
 import { CloseTradeModal } from "@/components/journal/close-trade-modal";
 import { GlassModal } from "@/components/ui/glass-modal";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { useTranslation } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/dictionaries";
+
+/** Badge REAL vs PAPER untuk tiap baris ledger. */
+function ModeBadge({
+  tradeType,
+  tr,
+}: {
+  tradeType: "PAPER" | "LIVE";
+  tr: (k: TranslationKey) => string;
+}) {
+  const live = tradeType === "LIVE";
+  return (
+    <span
+      title={live ? tr("journal.badge.liveTitle") : tr("journal.badge.paperTitle")}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+        live
+          ? "bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/30"
+          : "bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25"
+      }`}
+    >
+      {live ? <Zap className="w-2.5 h-2.5" /> : <Beaker className="w-2.5 h-2.5" />}
+      {live ? tr("journal.badge.live") : tr("journal.badge.paper")}
+    </span>
+  );
+}
 
 const PRICE_POLL_MS = 3000;
 const LEDGER_POLL_MS = 12000;
 
-const entryOf = (t: TradeRecord) => t.filled_price ?? t.entry_price;
+// Bentuk minimum yang dibutuhkan perhitungan PnL — berlaku untuk TradeRecord
+// maupun LedgerRow (paper/live/exchange) tanpa memaksa salah satu tipe.
+type PnlInput = {
+  status: string;
+  side: "BUY" | "SELL";
+  entry_price: number;
+  filled_price?: number | null;
+  position_size_coin: number;
+  allocated_margin_usdt: number;
+};
+
+const entryOf = (t: PnlInput) => t.filled_price ?? t.entry_price;
 
 /** Unrealized PnL untuk posisi OPEN pada harga live. */
-function floatingPnl(t: TradeRecord, cur: number | undefined): number | null {
+function floatingPnl(t: PnlInput, cur: number | undefined): number | null {
   if (t.status !== "OPEN" || typeof cur !== "number" || !Number.isFinite(cur)) return null;
   const entry = entryOf(t);
   const size = t.position_size_coin;
@@ -23,7 +68,7 @@ function floatingPnl(t: TradeRecord, cur: number | undefined): number | null {
 }
 
 /** Return on Equity (margin) dalam %. */
-const roePct = (t: TradeRecord, pnl: number | null): number | null =>
+const roePct = (t: PnlInput, pnl: number | null): number | null =>
   pnl === null || !t.allocated_margin_usdt ? null : (pnl / t.allocated_margin_usdt) * 100;
 
 type Trade = { id: number; pair: string; type: string; pnl: string; date: string; notes: string; };
@@ -51,8 +96,15 @@ export default function JournalPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [priceTick, setPriceTick] = useState(0);
-  const [closeTarget, setCloseTarget] = useState<TradeRecord | null>(null);
+  const [closeTarget, setCloseTarget] = useState<LedgerRow | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  // --- Smart Journal: paper (localStorage) + akun bursa asli (read-only) --- #
+  const [paperTrades, setPaperTrades] = useState<PaperTrade[]>([]);
+  const [liveAccount, setLiveAccount] = useState<ExchangeAccount | null>(null);
+  // Snapshot 1x per render dari Workspace Config; halaman di-guard `!mounted`.
+  const ws = getWorkspace();
+  const hasExchangeKeys = credentialsStatus(ws.exchange).ready;
 
   const loadEngine = useCallback(async () => {
     setRefreshing(true);
@@ -60,7 +112,12 @@ export default function JournalPage() {
       const [j, a] = await Promise.all([fetchJournal(accountId, 100), fetchAccount(accountId)]);
       // Anti-glitch: hanya perbarui state kalau data valid — jangan reset ke
       // kosong / null saat fetch gagal / parsial (bikin angka kedip ke 0).
-      if (Array.isArray(j?.trades)) setExecTrades(j.trades);
+      if (Array.isArray(j?.trades)) {
+        setExecTrades(j.trades);
+        // Rekonsiliasi paper history lama dari backend ke localStorage.
+        const backendPaper = j.trades.filter((t: TradeRecord) => t.mode === "PAPER_TRADING");
+        if (backendPaper.length) setPaperTrades(syncPaperTrades(backendPaper));
+      }
       if (a?.account) setExecAccount(a.account);
     } catch (e) {
       console.error("Gagal memuat Trade Ledger:", e);
@@ -70,19 +127,66 @@ export default function JournalPage() {
     }
   }, [accountId]);
 
+  // Saldo + posisi ASLI dari bursa — hanya kalau user sudah menyimpan kuncinya.
+  const loadLiveAccount = useCallback(async () => {
+    if (!hasExchangeKeys) {
+      setLiveAccount(null);
+      return;
+    }
+    const acc = await fetchExchangeAccount();
+    setLiveAccount(acc);
+  }, [hasExchangeKeys]);
+
   useEffect(() => {
     loadEngine();
     const t = setInterval(loadEngine, LEDGER_POLL_MS);
     return () => clearInterval(t);
   }, [loadEngine]);
 
-  // Simbol dengan posisi OPEN yang perlu harga live.
+  useEffect(() => {
+    loadLiveAccount();
+    const t = setInterval(loadLiveAccount, LEDGER_POLL_MS * 2);
+    return () => clearInterval(t);
+  }, [loadLiveAccount]);
+
+  // Paper ledger dari localStorage: baca segera, lalu ikuti perubahan (eksekusi
+  // Paper Trade di Scanner/AI Chat mem-broadcast PAPER_LEDGER_EVENT).
+  useEffect(() => {
+    const sync = () => setPaperTrades(getPaperTrades());
+    sync();
+    window.addEventListener(PAPER_LEDGER_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(PAPER_LEDGER_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  // Daftar ledger terpadu: PAPER (localStorage) + LIVE (backend + posisi bursa).
+  const unifiedRows = useMemo(
+    () =>
+      buildUnifiedLedger({
+        paperTrades,
+        backendTrades: execTrades,
+        exchangeAccount: liveAccount,
+        accountId,
+      }),
+    [paperTrades, execTrades, liveAccount, accountId],
+  );
+
+  // Sumber saldo: bursa asli kalau tersedia, kalau tidak saldo virtual paper.
+  const liveOk = liveAccount?.status === "ok" && !!liveAccount.balance;
+  const baseBalance = liveOk
+    ? liveAccount!.balance!.stable_total_usd
+    : execAccount?.balance_usdt ?? 10000;
+
+  // Simbol dengan posisi OPEN yang perlu harga live (paper + live).
   const openSymbols = useMemo(
     () =>
       Array.from(
-        new Set(execTrades.filter((t) => t.status === "OPEN").map((t) => t.symbol)),
+        new Set(unifiedRows.filter((t) => t.status === "OPEN").map((t) => t.symbol)),
       ),
-    [execTrades],
+    [unifiedRows],
   );
   const openSymbolsKey = openSymbols.join(",");
 
@@ -109,16 +213,37 @@ export default function JournalPage() {
   }, [openSymbolsKey]);
 
   // Agregat floating PnL + Total Equity (net worth), live.
+  // Untuk baris posisi bursa pakai PnL dari bursa itu sendiri; sisanya dihitung
+  // dari harga live yang di-poll.
   const { totalFloating, totalEquity } = useMemo(() => {
-    const tf = execTrades.reduce((sum, t) => {
-      const pnl = floatingPnl(t, livePrices[t.symbol]);
+    const tf = unifiedRows.reduce((sum, t) => {
+      if (t.status !== "OPEN") return sum;
+      const pnl =
+        t.source === "exchange" && typeof t.live_unrealized_pnl === "number"
+          ? t.live_unrealized_pnl
+          : floatingPnl(t, livePrices[t.symbol]);
       return sum + (pnl ?? 0);
     }, 0);
-    const bal = execAccount?.balance_usdt ?? 0;
-    return { totalFloating: tf, totalEquity: bal + tf };
+    return { totalFloating: tf, totalEquity: baseBalance + tf };
     // priceTick memaksa recompute tiap poll walau referensi livePrices sama isinya
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [execTrades, execAccount, livePrices, priceTick]);
+  }, [unifiedRows, baseBalance, livePrices, priceTick]);
+
+  // Tutup PAPER trade di sisi klien (localStorage), PnL vs harga live/manual.
+  const handlePaperClose = (row: LedgerRow, exitPrice: number, pnl: number) => {
+    const rec = closePaperTrade(row.id, exitPrice, pnl);
+    setCloseTarget(null);
+    if (!rec) {
+      pushToast("error", "Gagal menutup posisi paper", "Trade tidak ditemukan di ledger lokal.");
+      return;
+    }
+    setPaperTrades(getPaperTrades());
+    pushToast(
+      "success",
+      `${row.symbol} (PAPER) ditutup`,
+      `Exit $${money(exitPrice, 4)} · PnL ${pnl >= 0 ? "+" : "-"}$${money(Math.abs(pnl))}`,
+    );
+  };
 
   // Hasil dari CloseTradeModal — toast in-app, bukan alert browser.
   const handleCloseDone = (res: any | null, error: string | null) => {
@@ -286,7 +411,7 @@ export default function JournalPage() {
             </div>
           </div>
 
-          {execAccount && (
+          {(execAccount || liveAccount || paperTrades.length > 0) && (
             <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-3">
                 <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500 flex items-center gap-1">
@@ -318,22 +443,40 @@ export default function JournalPage() {
                   {totalFloating >= 0 ? "+" : "-"}${money(Math.abs(totalFloating))}
                 </p>
               </div>
-              <div className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-3">
-                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">{tr("journal.virtualBalance")}</p>
+
+              {/* SMART BALANCE — saldo bursa asli kalau ada kunci API, kalau
+                  tidak jatuh ke saldo virtual simulasi $10,000. */}
+              <div className={`rounded-lg border bg-white dark:bg-[#0b0b0d] p-3 ${
+                liveOk
+                  ? "border-emerald-300 dark:border-emerald-500/30"
+                  : "border-slate-200 dark:border-zinc-800"
+              }`}>
+                <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500 flex items-center gap-1">
+                  {liveOk ? (
+                    <><Zap className="w-3 h-3 text-emerald-500" /> {tr("journal.liveBalance")}</>
+                  ) : (
+                    <><Beaker className="w-3 h-3" /> {tr("journal.virtualBalance")}</>
+                  )}
+                </p>
                 <p className="mt-1 text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">
-                  ${money(execAccount.balance_usdt)}
+                  ${money(baseBalance)}
                 </p>
                 <p className="text-[10px] text-slate-400 dark:text-zinc-500">
-                  realized {execAccount.realized_pnl_usdt >= 0 ? "+" : ""}${money(execAccount.realized_pnl_usdt)}
+                  {liveOk
+                    ? tr("journal.liveBalanceSub").replace("{exchange}", liveAccount!.exchange_label)
+                    : hasExchangeKeys
+                    ? tr("journal.balanceUnavailable")
+                    : tr("journal.virtualBalanceSub")}
                 </p>
               </div>
+
               <div className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] p-3">
                 <p className="text-[10px] uppercase tracking-wider font-medium text-slate-400 dark:text-zinc-500">{tr("journal.openPositions")}</p>
                 <p className="mt-1 text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">
-                  {execAccount.open_positions}
+                  {unifiedRows.filter((t) => t.status === "OPEN").length}
                 </p>
                 <p className="text-[10px] text-slate-400 dark:text-zinc-500">
-                  margin ${money(execAccount.allocated_margin_usdt)}
+                  {tr("journal.ledgerLegend")}
                 </p>
               </div>
             </div>
@@ -376,22 +519,28 @@ export default function JournalPage() {
                     <Loader2 className="w-5 h-5 animate-spin inline" />
                   </td>
                 </tr>
-              ) : execTrades.length === 0 ? (
+              ) : unifiedRows.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="p-8 text-center text-slate-400 dark:text-zinc-500">
                     {tr("journal.emptyLedger")}
                   </td>
                 </tr>
               ) : (
-                execTrades.map((t) => {
+                unifiedRows.map((t) => {
                   const cur = livePrices[t.symbol];
-                  const fPnl = floatingPnl(t, cur);
+                  const fPnl =
+                    t.source === "exchange" && typeof t.live_unrealized_pnl === "number"
+                      ? t.live_unrealized_pnl
+                      : floatingPnl(t, cur);
                   const fRoe = roePct(t, fPnl);
                   const isOpen = t.status === "OPEN";
+                  const curShown = t.source === "exchange" ? t.live_mark_price : cur;
                   return (
-                  <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-zinc-900/30">
+                  <tr key={`${t.source}:${t.id}`} className="hover:bg-slate-50 dark:hover:bg-zinc-900/30">
                     <td className="p-3 text-slate-500 dark:text-zinc-400 font-mono whitespace-nowrap">
-                      {new Date(t.created_at).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })}
+                      {t.source === "exchange"
+                        ? "— · live"
+                        : new Date(t.created_at).toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" })}
                     </td>
                     <td className="p-3 font-bold text-slate-900 dark:text-white">{t.symbol}</td>
                     <td className="p-3">
@@ -400,20 +549,23 @@ export default function JournalPage() {
                       </span>
                     </td>
                     <td className="p-3">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 dark:text-zinc-400">
-                        {t.mode === "PAPER_TRADING" ? <Beaker className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
-                        {t.mode === "PAPER_TRADING"
-                          ? "PAPER"
-                          : `LIVE ${(t.exchange_label || t.mode.replace("LIVE_", "")).toUpperCase()}${t.market_type ? " · " + t.market_type.toUpperCase() : ""}`}
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <ModeBadge tradeType={t.tradeType} tr={tr} />
+                        {t.tradeType === "LIVE" && (
+                          <span className="text-[10px] text-slate-400 dark:text-zinc-500">
+                            {(t.exchange_label || t.mode.replace("LIVE_", "")).toUpperCase()}
+                            {t.market_type ? " · " + t.market_type.toUpperCase() : ""}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">{money(entryOf(t), 4)}</td>
                     <td className="p-3 font-mono whitespace-nowrap">
                       {isOpen ? (
-                        typeof cur === "number" ? (
+                        typeof curShown === "number" ? (
                           <span className="inline-flex items-center gap-1.5 text-slate-900 dark:text-white">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            {money(cur, 4)}
+                            {money(curShown, 4)}
                           </span>
                         ) : (
                           <span className="text-slate-400 dark:text-zinc-600">…</span>
@@ -425,9 +577,15 @@ export default function JournalPage() {
                       )}
                     </td>
                     <td className="p-3 font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">
-                      <span className="text-red-500">{money(t.stop_loss_price, 4)}</span>
-                      {" / "}
-                      <span className="text-emerald-500">{(t.take_profit_targets || []).map((x) => money(x, 4)).join(", ")}</span>
+                      {t.stop_loss_price > 0 ? (
+                        <>
+                          <span className="text-red-500">{money(t.stop_loss_price, 4)}</span>
+                          {" / "}
+                          <span className="text-emerald-500">{(t.take_profit_targets || []).map((x) => money(x, 4)).join(", ") || "—"}</span>
+                        </>
+                      ) : (
+                        <span className="text-slate-400 dark:text-zinc-600">—</span>
+                      )}
                     </td>
                     <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">{t.position_size_coin}</td>
                     <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">${money(t.allocated_margin_usdt)}</td>
@@ -470,7 +628,7 @@ export default function JournalPage() {
                       )}
                     </td>
                     <td className="p-3">
-                      {isOpen && t.mode === "PAPER_TRADING" && (
+                      {isOpen && t.source === "paper" && (
                         <button
                           onClick={() => setCloseTarget(t)}
                           className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-rose-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors"
@@ -490,7 +648,15 @@ export default function JournalPage() {
 
       {/* TABLE SECTION */}
       <div className="border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl overflow-hidden mt-6 shadow-sm dark:shadow-none transition-colors duration-500">
-        <div className="px-4 pt-4 text-sm font-semibold text-slate-900 dark:text-white">{tr("journal.manual.title")}</div>
+        <div className="px-4 pt-4 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+          {tr("journal.manual.title")}
+          <span
+            title={tr("journal.badge.paperTitle")}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border bg-slate-100 text-slate-600 border-slate-300 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700"
+          >
+            <FileText className="w-2.5 h-2.5" /> {tr("journal.manual.tag")}
+          </span>
+        </div>
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 dark:bg-zinc-900/50 dark:border-zinc-800 dark:text-zinc-400 transition-colors">
             <tr>
@@ -517,7 +683,17 @@ export default function JournalPage() {
                   title={tr("journal.manual.viewDetails")}
                 >
                   <td className="p-4 text-slate-500 dark:text-zinc-400">{trade.date}</td>
-                  <td className="p-4 font-bold text-slate-900 dark:text-white">{trade.pair}</td>
+                  <td className="p-4 font-bold text-slate-900 dark:text-white">
+                    <span className="inline-flex items-center gap-2">
+                      {trade.pair}
+                      <span
+                        title={tr("journal.badge.paperTitle")}
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border bg-slate-100 text-slate-500 border-slate-300 dark:bg-zinc-800 dark:text-zinc-500 dark:border-zinc-700"
+                      >
+                        {tr("journal.manual.tag")}
+                      </span>
+                    </span>
+                  </td>
                   <td className="p-4">
                     <span className={`px-2 py-1 rounded text-xs font-bold transition-colors ${
                       trade.type === "LONG" 
@@ -690,12 +866,17 @@ export default function JournalPage() {
         </div>
       )}
 
-      {/* MODAL: KONFIRMASI TUTUP POSISI (glassmorphism) */}
+      {/* MODAL: KONFIRMASI TUTUP POSISI (glassmorphism) — paper = tutup di klien */}
       <CloseTradeModal
         trade={closeTarget}
         accountId={accountId}
         onCancel={() => setCloseTarget(null)}
         onDone={handleCloseDone}
+        onLocalClose={
+          closeTarget
+            ? (exit, pnl) => handlePaperClose(closeTarget, exit, pnl)
+            : undefined
+        }
       />
 
       {/* MODAL: KONFIRMASI HAPUS ENTRI JURNAL MANUAL */}

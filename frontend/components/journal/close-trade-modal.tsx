@@ -3,22 +3,39 @@
 import { useEffect, useState } from "react";
 import { TerminalSquare, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
 import { GlassModal } from "@/components/ui/glass-modal";
-import { closeTrade, fetchLivePrice, type TradeRecord } from "@/lib/trade";
+import { closeTrade, fetchLivePrice } from "@/lib/trade";
 
 const money = (v: number | null | undefined, d = 2) =>
   typeof v === "number" && Number.isFinite(v)
     ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })
     : "—";
 
+// Bentuk minimum yang dibutuhkan modal — cocok untuk TradeRecord & LedgerRow.
+type ClosableTrade = {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  mode: string;
+  entry_price: number;
+  filled_price?: number | null;
+  position_size_coin: number;
+  allocated_margin_usdt: number;
+};
+
 type Props = {
-  trade: TradeRecord | null;
+  trade: ClosableTrade | null;
   accountId: string;
   onCancel: () => void;
   onDone: (result: any | null, error: string | null) => void;
+  /**
+   * Kalau diberikan, penutupan dihitung & disimpan di sisi klien (paper trade
+   * di localStorage) — TIDAK memanggil backend /trade/close.
+   */
+  onLocalClose?: (exitPrice: number, pnlUsdt: number) => void;
 };
 
 /** Modal konfirmasi tutup posisi — glassmorphism, PnL realisasi live. */
-export function CloseTradeModal({ trade, accountId, onCancel, onDone }: Props) {
+export function CloseTradeModal({ trade, accountId, onCancel, onDone, onLocalClose }: Props) {
   const [live, setLive] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -52,6 +69,14 @@ export function CloseTradeModal({ trade, accountId, onCancel, onDone }: Props) {
   const confirm = async () => {
     setSubmitting(true);
     try {
+      if (onLocalClose) {
+        // Paper trade — hitung & simpan di klien, tanpa backend.
+        const exit = live ?? entry;
+        const p =
+          trade.side === "BUY" ? (exit - entry) * size : (entry - exit) * size;
+        onLocalClose(exit, p);
+        return;
+      }
       const res = await closeTrade(accountId, trade.id, live ?? undefined);
       onDone(res, null);
     } catch (e) {

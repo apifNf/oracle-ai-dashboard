@@ -47,6 +47,7 @@ __all__ = [
     "build_ccxt_exchange",
     "to_ccxt_symbol",
     "place_order",
+    "fetch_exchange_account",
     "futures_default_type",
     "validate_route",
     "redact",
@@ -318,3 +319,105 @@ def place_order(
         "status": order.get("status"),
         "raw": {k: order.get(k) for k in ("id", "symbol", "type", "side", "amount", "status")},
     }
+
+
+# --------------------------------------------------------------------------- #
+# Snapshot akun bursa (READ-ONLY — untuk "Smart Journal")
+# --------------------------------------------------------------------------- #
+
+_STABLES = ("USDT", "USDC", "USD", "BUSD", "DAI")
+
+
+def fetch_exchange_account(
+    exchange_id: str,
+    market_type: str,
+    *,
+    credentials: Credentials,
+) -> dict[str, Any]:
+    """
+    Ambil saldo + posisi terbuka dari akun bursa milik user.
+
+    READ-ONLY: hanya fetch_balance / fetch_positions. Tidak pernah menempatkan
+    order, jadi TIDAK di-gate oleh TRADE_LIVE_ENABLED. Dijalankan di endpoint
+    LIVE (testnet=False) karena tujuannya justru saldo asli user.
+
+    Kredensial dipakai sekali di sini lalu dibuang bersama instance CCXT-nya —
+    tidak di-log, tidak disimpan. Kegagalan dikembalikan sebagai status
+    "unavailable" dengan alasan, bukan exception yang bocor.
+    """
+    ex, mt = _normalize(exchange_id, market_type)
+    label = EXCHANGE_LABELS.get(ex, ex.upper())
+    base = {"exchange_id": ex, "exchange_label": label, "market_type": mt}
+
+    try:
+        exchange = build_ccxt_exchange(
+            ex, mt, credentials=credentials, testnet=False
+        )
+    except ExchangeAdapterError as exc:
+        return {
+            **base, "status": "unavailable", "balance": None, "positions": [],
+            "error": {"code": "adapter", "message": redact(
+                exc, credentials.api_key, credentials.api_secret, credentials.api_password
+            )},
+        }
+
+    balance: dict[str, float] = {}
+    try:
+        raw = exchange.fetch_balance()
+        for coin in _STABLES:
+            entry = (raw.get(coin) if isinstance(raw, dict) else None) or {}
+            free = _num(entry.get("free"))
+            total = _num(entry.get("total"))
+            if free or total:
+                balance[coin] = {"free": free, "total": total}
+    except Exception as exc:
+        return {
+            **base, "status": "unavailable", "balance": None, "positions": [],
+            "error": {"code": "fetch_balance", "message": redact(
+                exc, credentials.api_key, credentials.api_secret, credentials.api_password
+            )},
+        }
+
+    stable_total = round(sum(v["total"] for v in balance.values()), 2)
+    stable_free = round(sum(v["free"] for v in balance.values()), 2)
+
+    positions: list[dict[str, Any]] = []
+    if mt == "futures":
+        try:
+            for p in exchange.fetch_positions() or []:
+                contracts = _num(p.get("contracts"))
+                if contracts <= 0:
+                    continue
+                positions.append({
+                    "symbol": p.get("symbol"),
+                    "side": str(p.get("side") or "").upper() or None,
+                    "contracts": contracts,
+                    "entry_price": _num(p.get("entryPrice")),
+                    "mark_price": _num(p.get("markPrice")),
+                    "unrealized_pnl": _num(p.get("unrealizedPnl")),
+                    "leverage": _num(p.get("leverage")) or None,
+                    "notional": _num(p.get("notional")),
+                })
+        except Exception:
+            # Posisi opsional — saldo saja sudah berguna untuk Smart Balance.
+            logger.debug("fetch_positions gagal untuk %s (tidak fatal).", ex, exc_info=True)
+
+    return {
+        **base,
+        "status": "ok",
+        "balance": {
+            "by_coin": balance,
+            "stable_total_usd": stable_total,
+            "stable_free_usd": stable_free,
+        },
+        "positions": positions,
+        "error": None,
+    }
+
+
+def _num(value: Any) -> float:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return n if n == n and abs(n) != float("inf") else 0.0

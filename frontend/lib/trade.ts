@@ -1,6 +1,7 @@
 // Client helpers untuk Trade Execution Engine (Tugas 2).
 
-import { getExchangeCredentials } from "@/lib/workspace";
+import { getExchangeCredentials, getWorkspace } from "@/lib/workspace";
+import { addPaperTrade } from "@/lib/paper-ledger";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
@@ -128,7 +129,24 @@ export async function executeTrade(
   // Paper trading tidak menyentuh bursa, jadi kuncinya tidak pernah dikirim.
   if (params.mode === "PAPER_TRADING") {
     const { api_key, secret_key, passphrase, ...safe } = params;
-    return post("/api/v1/trade/execute", safe);
+    const res = await post("/api/v1/trade/execute", safe);
+    // Smart Journal: cermin paper trade ke localStorage begitu tereksekusi,
+    // supaya bertahan walau TradeStore server ter-reset dan bisa diberi badge
+    // "PAPER" di halaman Journal. Kegagalan menulis tidak boleh menggagalkan
+    // eksekusi yang sudah sukses di server.
+    try {
+      const t = res?.trade;
+      if (t && t.symbol) {
+        addPaperTrade({
+          ...t,
+          market_type: params.market_type,
+          exchange_id: params.exchange_id,
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    return res;
   }
 
   const stored = getExchangeCredentials();
@@ -139,6 +157,58 @@ export async function executeTrade(
     passphrase: params.passphrase ?? stored.passphrase,
   };
   return post("/api/v1/trade/execute", body);
+}
+
+// --------------------------------------------------------------------------- //
+// Smart Journal — snapshot akun bursa asli (READ-ONLY)
+// --------------------------------------------------------------------------- //
+
+export type ExchangePosition = {
+  symbol: string;
+  side: string | null;
+  contracts: number;
+  entry_price: number;
+  mark_price: number;
+  unrealized_pnl: number;
+  leverage: number | null;
+  notional: number;
+};
+
+export type ExchangeAccount = {
+  status: "ok" | "unavailable";
+  exchange_id: string;
+  exchange_label: string;
+  market_type: string;
+  balance: {
+    by_coin: Record<string, { free: number; total: number }>;
+    stable_total_usd: number;
+    stable_free_usd: number;
+  } | null;
+  positions: ExchangePosition[];
+  error: { code: string; message: string } | null;
+};
+
+/**
+ * Saldo + posisi dari akun bursa milik user. Hanya dipanggil bila user SUDAH
+ * menyimpan API Key + Secret (+ passphrase bila perlu) — kalau belum, return
+ * null dan Journal jatuh ke "Virtual Balance $10,000".
+ */
+export async function fetchExchangeAccount(): Promise<ExchangeAccount | null> {
+  const ws = getWorkspace();
+  const creds = getExchangeCredentials();
+  if (!creds.api_key.trim() || !creds.secret_key.trim()) return null;
+  try {
+    const data = await post("/api/v1/trade/exchange-account", {
+      exchange_id: ws.exchange,
+      market_type: ws.environment,
+      api_key: creds.api_key,
+      secret_key: creds.secret_key,
+      passphrase: creds.passphrase,
+    });
+    return data as ExchangeAccount;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchJournal(accountId: string, limit = 100) {
