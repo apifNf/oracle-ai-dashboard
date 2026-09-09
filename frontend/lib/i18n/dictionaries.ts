@@ -266,13 +266,48 @@ export const en = {
   "settings.saved": "Configuration Saved!",
 
   // ------------------------------------------------------------------ //
+  // Modal Upgrade PRO (billing)
+  // ------------------------------------------------------------------ //
+  "billing.title": "Upgrade to ORACLE PRO",
+  "billing.period": "/ month · {days} days",
+  "billing.later": "Later",
+  "billing.preparing": "Preparing…",
+  "billing.payCta": "Pay ${price} via Crypto (USDC/USDT)",
+  "billing.multiChain": "Pay with multi-chain stablecoins:",
+  "billing.benefit.prompts": "Unlimited FABLE 5 Prompts (with Actionable Trader's Take)",
+  "billing.benefit.strategy": "Deep Actionable Strategy & Trader's Take (not just raw data)",
+  "billing.benefit.intel":
+    "Real-Time Market Intel (Live CryptoCompare News, Macro Economic Calendar, & Hardcore Whale Terminal)",
+  "billing.benefit.quant": "Priority Opus quant model (claude-opus-5)",
+  "billing.benefit.scanner": "Live Signal Scanner Alerts",
+  "billing.benefit.autotrade": "Autotrade Engine (paper + live guardrails)",
+  "billing.toast.sandbox": "Sandbox mode — simulated checkout",
+  "billing.toast.opening": "Opening Coinbase checkout…",
+  "billing.toast.failed": "Failed to create charge",
+
+  // ------------------------------------------------------------------ //
+  // FAQ (halaman Settings)
+  // ------------------------------------------------------------------ //
+  "faq.title": "Frequently Asked Questions",
+  "faq.subtitle": "Getting started with ORACLE and your exchange keys.",
+  "faq.q1": "What is ORACLE?",
+  "faq.a1":
+    "ORACLE is a non-custodial AI crypto trading terminal. We use advanced AI models to provide high-probability signals and execute trades automatically.",
+  "faq.q2": "How to create an API Key on a CEX?",
+  "faq.a2":
+    'Log into your exchange account (Binance, OKX, Bybit, etc.), navigate to "API Management", and create a new key. Ensure you ENABLE "Spot Trading" and DISABLE "Withdrawals" for security.',
+  "faq.q3": "How to connect API to ORACLE?",
+  "faq.a3":
+    "Copy the API Key and Secret Key from your exchange, then paste them into the Workspace configuration above. Your keys are securely stored in your browser's local storage.",
+
+  // ------------------------------------------------------------------ //
   // Onboarding: cara trading di ORACLE
   // ------------------------------------------------------------------ //
   "onboarding.title": "How to trade on ORACLE",
   "onboarding.subtitle": "Three steps from API key to execution.",
   "onboarding.dismiss": "Dismiss",
   "onboarding.step1.title": "Connect Exchange",
-  "onboarding.step1.desc": "Securely connect your OKX/Bybit API keys in Settings.",
+  "onboarding.step1.desc": "Securely connect your Exchange/CEX API keys in Settings.",
   "onboarding.step2.title": "Discover Alpha",
   "onboarding.step2.desc": "Find high-probability signals using the Live Scanner.",
   "onboarding.step3.title": "Smart Execution",
@@ -536,13 +571,49 @@ export const id: Record<TranslationKey, string> = {
   "settings.saved": "Konfigurasi Tersimpan!",
 
   // ------------------------------------------------------------------ //
+  // Modal Upgrade PRO (billing)
+  // ------------------------------------------------------------------ //
+  "billing.title": "Upgrade ke ORACLE PRO",
+  "billing.period": "/ bulan · {days} hari",
+  "billing.later": "Nanti",
+  "billing.preparing": "Menyiapkan…",
+  "billing.payCta": "Bayar ${price} via Crypto (USDC/USDT)",
+  "billing.multiChain": "Bayar stablecoin multi-chain:",
+  "billing.benefit.prompts": "Prompt FABLE 5 tanpa batas (dengan Trader's Take yang bisa dieksekusi)",
+  "billing.benefit.strategy":
+    "Strategi mendalam & Trader's Take yang bisa dieksekusi (bukan sekadar data)",
+  "billing.benefit.intel":
+    "Intelijen Pasar Real-Time (berita CryptoCompare langsung, Kalender Ekonomi Makro, & Terminal Whale)",
+  "billing.benefit.quant": "Prioritas model quant Opus (claude-opus-5)",
+  "billing.benefit.scanner": "Notifikasi Pemindai Sinyal Langsung",
+  "billing.benefit.autotrade": "Mesin Auto-Trade (paper + guardrail live)",
+  "billing.toast.sandbox": "Mode sandbox — checkout simulasi",
+  "billing.toast.opening": "Membuka checkout Coinbase…",
+  "billing.toast.failed": "Gagal membuat charge",
+
+  // ------------------------------------------------------------------ //
+  // FAQ (halaman Settings)
+  // ------------------------------------------------------------------ //
+  "faq.title": "Pertanyaan yang Sering Diajukan",
+  "faq.subtitle": "Langkah awal memakai ORACLE dan kunci bursa Anda.",
+  "faq.q1": "Apa itu ORACLE?",
+  "faq.a1":
+    "ORACLE adalah terminal trading kripto berbasis AI non-custodial. Kami menggunakan model AI tingkat lanjut untuk memberikan sinyal probabilitas tinggi dan mengeksekusi trade secara otomatis.",
+  "faq.q2": "Bagaimana cara membuat API Key di CEX?",
+  "faq.a2":
+    'Masuk ke akun bursa Anda (Binance, OKX, Bybit, dll), cari menu "API Management", dan buat kunci baru. Pastikan Anda MENGAKTIFKAN izin "Spot Trading" dan MEMATIKAN izin "Withdrawal" demi keamanan.',
+  "faq.q3": "Bagaimana cara menyambungkan API ke ORACLE?",
+  "faq.a3":
+    "Salin API Key dan Secret Key dari bursa Anda, lalu tempelkan di kolom pengaturan Workspace di atas. Kunci Anda akan disimpan dengan aman di local storage browser Anda.",
+
+  // ------------------------------------------------------------------ //
   // Onboarding: cara trading di ORACLE
   // ------------------------------------------------------------------ //
   "onboarding.title": "Cara trading di ORACLE",
   "onboarding.subtitle": "Tiga langkah dari kunci API sampai eksekusi.",
   "onboarding.dismiss": "Tutup",
   "onboarding.step1.title": "Hubungkan Bursa",
-  "onboarding.step1.desc": "Hubungkan kunci API OKX/Bybit Anda dengan aman di Pengaturan.",
+  "onboarding.step1.desc": "Hubungkan kunci API Exchange/CEX Anda dengan aman di Pengaturan.",
   "onboarding.step2.title": "Temukan Peluang",
   "onboarding.step2.desc": "Temukan sinyal berprobabilitas tinggi lewat Pemindai Langsung.",
   "onboarding.step3.title": "Eksekusi Pintar",

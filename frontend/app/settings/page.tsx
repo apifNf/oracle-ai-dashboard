@@ -10,6 +10,7 @@ import {
   exchangeLabel,
 } from "@/lib/workspace";
 import { useTranslation } from "@/lib/i18n/context";
+import { FAQSection } from "@/components/settings/faq-section";
 
 export default function SettingsPage() {
   const t = useTranslation();
@@ -224,6 +225,9 @@ export default function SettingsPage() {
             </p>
           </div>
         </section>
+
+        {/* FAQ — di bawah kotak konfigurasi API */}
+        <FAQSection />
 
         {/* SAVE BUTTON */}
         <div className="flex justify-end pt-4">

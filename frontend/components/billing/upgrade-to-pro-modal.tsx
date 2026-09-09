@@ -8,14 +8,17 @@ import {
   fetchBillingConfig,
   type BillingConfig,
 } from "@/lib/billing";
+import { useTranslation } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/dictionaries";
 
-const BENEFITS = [
-  "Unlimited FABLE 5 Prompts (with Actionable Trader's Take)",
-  "Deep Actionable Strategy & Trader's Take (bukan sekadar data)",
-  "Real-Time Market Intel (Live CryptoCompare News, Macro Economic Calendar, & Hardcore Whale Terminal)",
-  "Prioritas model quant Opus (claude-opus-5)",
-  "Live Signal Scanner Alerts",
-  "Autotrade Engine (paper + live guardrails)",
+// Kunci kamus, bukan teks jadi — daftar ini dirender ulang saat bahasa ganti.
+const BENEFIT_KEYS: TranslationKey[] = [
+  "billing.benefit.prompts",
+  "billing.benefit.strategy",
+  "billing.benefit.intel",
+  "billing.benefit.quant",
+  "billing.benefit.scanner",
+  "billing.benefit.autotrade",
 ];
 
 type Props = {
@@ -27,6 +30,7 @@ type Props = {
 };
 
 export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: Props) {
+  const t = useTranslation();
   const [config, setConfig] = useState<BillingConfig | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -42,7 +46,7 @@ export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: 
       const res = await createCharge(accountId, email);
       onToast?.(
         "info",
-        res.mock ? "Mode sandbox — checkout simulasi" : "Membuka checkout Coinbase…",
+        res.mock ? t("billing.toast.sandbox") : t("billing.toast.opening"),
         `Charge ${res.code ?? res.charge_id}`,
       );
       // Mock: navigasi relatif ke origin saat ini (bukan URL absolut backend).
@@ -51,7 +55,7 @@ export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: 
         ? `/billing/mock?charge=${encodeURIComponent(res.charge_id)}`
         : res.checkout_url;
     } catch (e) {
-      onToast?.("error", "Gagal membuat charge", e instanceof Error ? e.message : "unknown");
+      onToast?.("error", t("billing.toast.failed"), e instanceof Error ? e.message : "unknown");
       setLoading(false);
     }
   };
@@ -60,7 +64,7 @@ export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: 
     <GlassModal
       open={open}
       onClose={loading ? () => {} : onClose}
-      title="Upgrade ke ORACLE PRO"
+      title={t("billing.title")}
       icon={<Crown className="w-4 h-4 text-amber-400" />}
       footer={
         <>
@@ -69,7 +73,7 @@ export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: 
             disabled={loading}
             className="flex-1 rounded-xl border border-white/10 py-2.5 px-4 text-sm font-medium text-zinc-400 hover:text-white hover:border-white/20 transition disabled:opacity-50"
           >
-            Nanti
+            {t("billing.later")}
           </button>
           <button
             onClick={startCheckout}
@@ -81,7 +85,7 @@ export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: 
             ) : (
               <Bitcoin className="w-4 h-4" />
             )}
-            {loading ? "Menyiapkan…" : `Bayar $${price} via Crypto (USDC/USDT)`}
+            {loading ? t("billing.preparing") : t("billing.payCta", { price })}
           </button>
         </>
       }
@@ -89,21 +93,23 @@ export function UpgradeToProModal({ open, onClose, accountId, email, onToast }: 
       <div className="space-y-4">
         <div className="flex items-baseline gap-2">
           <span className="text-3xl font-bold text-white">${price}</span>
-          <span className="text-sm text-zinc-500">/ bulan · {config?.period_days ?? 30} hari</span>
+          <span className="text-sm text-zinc-500">
+            {t("billing.period", { days: config?.period_days ?? 30 })}
+          </span>
         </div>
 
         <ul className="space-y-2">
-          {BENEFITS.map((b) => (
-            <li key={b} className="flex items-start gap-2 text-sm text-zinc-300">
+          {BENEFIT_KEYS.map((key) => (
+            <li key={key} className="flex items-start gap-2 text-sm text-zinc-300">
               <Check className="w-4 h-4 mt-0.5 shrink-0 text-emerald-400" />
-              {b}
+              {t(key)}
             </li>
           ))}
         </ul>
 
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-zinc-400 flex items-center gap-2">
           <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          Bayar stablecoin multi-chain:{" "}
+          {t("billing.multiChain")}{" "}
           <span className="text-zinc-300">
             {(config?.accepted_networks ?? ["base", "polygon", "ethereum", "solana"])
               .map((n) => n[0].toUpperCase() + n.slice(1))
