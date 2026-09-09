@@ -299,6 +299,14 @@ export const en = {
   "faq.q3": "How to connect API to ORACLE?",
   "faq.a3":
     "Copy the API Key and Secret Key from your exchange, then paste them into the Workspace configuration above. Your keys are securely stored in your browser's local storage.",
+  "faq.q4": "Are my API Keys safe on ORACLE?",
+  // CATATAN AKURASI: klaim awal "never sent to our servers" TIDAK benar —
+  // pada order LIVE kunci memang dikirim di body request (dipakai sekali di
+  // memori lalu dibuang, lihat lib/trade.ts + resolve_credentials). Yang benar
+  // adalah kunci tidak pernah DISIMPAN. Janji keamanan yang bisa dipatahkan
+  // dengan membuka devtools justru menghancurkan kepercayaan yang mau dibangun.
+  "faq.a4":
+    "Absolutely safe. ORACLE uses a non-custodial architecture. Your secret keys are securely stored locally in your browser (Local Storage) and are never stored in our server databases \u2014 they are transmitted only at the moment you execute a trade, used once to place the order on your exchange, then discarded.",
 
   // ------------------------------------------------------------------ //
   // Onboarding: cara trading di ORACLE
@@ -605,6 +613,9 @@ export const id: Record<TranslationKey, string> = {
   "faq.q3": "Bagaimana cara menyambungkan API ke ORACLE?",
   "faq.a3":
     "Salin API Key dan Secret Key dari bursa Anda, lalu tempelkan di kolom pengaturan Workspace di atas. Kunci Anda akan disimpan dengan aman di local storage browser Anda.",
+  "faq.q4": "Apakah API Key saya aman di ORACLE?",
+  "faq.a4":
+    "Sangat aman. ORACLE menggunakan arsitektur non-custodial. Kunci rahasia Anda hanya disimpan secara aman di dalam browser Anda (Local Storage) dan tidak pernah disimpan di database server kami \u2014 kunci hanya dikirim saat Anda mengeksekusi trade, dipakai sekali untuk mengirim order ke bursa Anda, lalu dibuang.",
 
   // ------------------------------------------------------------------ //
   // Onboarding: cara trading di ORACLE
