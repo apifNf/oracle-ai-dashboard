@@ -298,6 +298,52 @@ def _resolve_exchange_keys(exchange_id: str, body: ExecuteRequest) -> Any:
     )
 
 
+@router.post("/validate-keys")
+async def trade_validate_keys(body: ExchangeAccountRequest) -> dict[str, Any]:
+    """
+    API KEY PERMISSION INTERCEPTOR.
+
+    Dipanggil Settings SEBELUM kunci disimpan ke localStorage. Membaca hak akses
+    kunci langsung dari bursa dan MENOLAK (403) kalau izin penarikan/transfer
+    masih aktif — kunci trade-only membatasi kerugian maksimum kalau browser
+    user disusupi.
+
+    Kode balikan:
+      200 state="safe"    -> terbukti tanpa withdraw/transfer, boleh disimpan
+      200 state="unknown" -> bursa tak bisa diverifikasi; UI wajib memperingatkan
+      400 state="invalid" -> bursa menolak kunci (auth gagal)
+      403 state="unsafe"  -> izin withdraw/transfer AKTIF, penyimpanan ditolak
+    """
+    from app.api.execute_trade import MissingCredentials, resolve_credentials
+    from app.services.key_guard import inspect_api_key
+
+    exchange_id = (body.exchange_id or settings.default_exchange_id).strip().lower()
+
+    try:
+        # allow_server_fallback=False: validasi HARUS menguji kunci milik user,
+        # bukan diam-diam lulus memakai kunci .env operator.
+        creds = resolve_credentials(
+            exchange_id,
+            user_key=body.api_key,
+            user_secret=body.secret_key,
+            user_passphrase=body.passphrase,
+            allow_server_fallback=False,
+        )
+    except MissingCredentials as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+    verdict = await asyncio.to_thread(
+        inspect_api_key, exchange_id, credentials=creds
+    )
+    payload = {"exchange_id": exchange_id, **verdict.as_dict()}
+
+    if verdict.state == "unsafe":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=payload)
+    if verdict.state == "invalid":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=payload)
+    return payload
+
+
 @router.post("/exchange-account")
 async def trade_exchange_account(body: ExchangeAccountRequest) -> dict[str, Any]:
     """

@@ -1,10 +1,24 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { buildCsp, SECURITY_HEADERS } from '@/lib/security/csp'
 
 export async function middleware(request: NextRequest) {
+  // --- Content Security Policy (mitigasi XSS pencuri API key) --------------
+  // Nonce HARUS unik per request; kalau dipakai ulang, penyerang bisa menebak
+  // dan menyematkan skrip yang lolos CSP.
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  const csp = buildCsp(nonce, process.env.NODE_ENV === 'development')
+
+  // Ditulis ke header REQUEST supaya Next.js membacanya dan menempelkan nonce
+  // yang sama ke <script> internalnya (bootstrap/hydration). Tanpa langkah ini
+  // skrip Next sendiri akan diblokir CSP dan halaman jadi kosong.
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-nonce', nonce)
+  requestHeaders.set('Content-Security-Policy', csp)
+
   let response = NextResponse.next({
     request: {
-      headers: request.headers,
+      headers: requestHeaders,
     },
   })
 
@@ -19,14 +33,14 @@ export async function middleware(request: NextRequest) {
         set(name: string, value: string, options: CookieOptions) {
           request.cookies.set({ name, value, ...options })
           response = NextResponse.next({
-            request: { headers: request.headers },
+            request: { headers: requestHeaders },
           })
           response.cookies.set({ name, value, ...options })
         },
         remove(name: string, options: CookieOptions) {
           request.cookies.set({ name, value: '', ...options })
           response = NextResponse.next({
-            request: { headers: request.headers },
+            request: { headers: requestHeaders },
           })
           response.cookies.set({ name, value: '', ...options })
         },
@@ -41,15 +55,21 @@ export async function middleware(request: NextRequest) {
   const isApiRoute = path.startsWith('/api') || path.startsWith('/auth')
   const isPublicRoute = path.startsWith('/market-intelligence')
 
+  const withSecurity = (res: NextResponse) => {
+    res.headers.set('Content-Security-Policy', csp)
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v)
+    return res
+  }
+
   if (!user && !isAuthRoute && !isApiRoute && !isPublicRoute) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return withSecurity(NextResponse.redirect(new URL('/login', request.url)))
   }
 
   if (user && isAuthRoute) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return withSecurity(NextResponse.redirect(new URL('/', request.url)))
   }
 
-  return response
+  return withSecurity(response)
 }
 
 export const config = {

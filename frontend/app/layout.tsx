@@ -1,4 +1,5 @@
 ﻿import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
 import { ThemeProvider } from "next-themes";
@@ -10,6 +11,10 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // Nonce CSP per-request dari middleware. Setiap <script> inline WAJIB
+  // membawanya — tanpa nonce, CSP strict akan memblokirnya.
+  const nonce = headers().get("x-nonce") ?? undefined;
+
   // SCHEMA MARKUP (JSON-LD) GRAPH STRATEGY - OPTIMIZED FOR A.I. SGE & LLMs
   const jsonLd = {
     "@context": "https://schema.org",
@@ -103,10 +108,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         {/* INJEKSI JSON-LD KE DALAM DOM */}
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
         
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={true}>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={true} nonce={nonce}>
           <I18nProvider>
             <AppShell>
               <div className="flex flex-col h-full min-h-[calc(100vh-4rem)]">

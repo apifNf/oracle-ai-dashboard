@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useState, useEffect } from "react";
-import { Save, Key, Wallet, Shield, Check, AlertTriangle } from "lucide-react";
+import { Save, Key, Wallet, Shield, Check, AlertTriangle, Loader2 } from "lucide-react";
 import {
   WORKSPACE_EVENT,
   getExchangeCredentials,
@@ -10,6 +10,8 @@ import {
   exchangeLabel,
 } from "@/lib/workspace";
 import { useTranslation } from "@/lib/i18n/context";
+import { validateExchangeKeys } from "@/lib/trade";
+import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { FAQSection } from "@/components/settings/faq-section";
 
 export default function SettingsPage() {
@@ -23,6 +25,8 @@ export default function SettingsPage() {
   const [exchangeSecret, setExchangeSecret] = useState("");
   const [exchangePassphrase, setExchangePassphrase] = useState("");
   const [isSaved, setIsSaved] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
 
   // 2. Mengambil data dari memori saat halaman pertama kali dibuka
   useEffect(() => {
@@ -39,8 +43,7 @@ export default function SettingsPage() {
     setExchangePassphrase(creds.passphrase);
   }, []);
 
-  // 3. Fungsi untuk menyimpan data secara permanen saat tombol Save diklik
-  const handleSave = () => {
+  const persist = () => {
     localStorage.setItem("oracle_exchange", exchange);
     localStorage.setItem("oracle_environment", environment);
     localStorage.setItem("oracle_openai_key", openAiKey);
@@ -50,13 +53,63 @@ export default function SettingsPage() {
       secret_key: exchangeSecret,
       passphrase: exchangePassphrase,
     });
-
     // Beri tahu komponen lain (Trade Ticket, dst.) supaya ikut menyesuaikan.
     window.dispatchEvent(new Event(WORKSPACE_EVENT));
-
-    // Memberikan efek visual bahwa data berhasil disimpan
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  // 3. Simpan — DIDAHULUI interceptor izin kunci.
+  //    Kunci yang masih bisa menarik dana TIDAK BOLEH masuk localStorage: di
+  //    situlah satu XSS berubah dari "pencurian sesi" menjadi "dana hilang".
+  const handleSave = async () => {
+    const hasKeys = exchangeKey.trim() && exchangeSecret.trim();
+    if (!hasKeys) {
+      // Tidak ada kunci bursa untuk divalidasi (mis. hanya mengubah OpenAI key
+      // atau dropdown workspace) — simpan seperti biasa.
+      persist();
+      return;
+    }
+
+    setValidating(true);
+    try {
+      const v = await validateExchangeKeys({
+        exchange_id: exchange,
+        api_key: exchangeKey.trim(),
+        secret_key: exchangeSecret.trim(),
+        passphrase: exchangePassphrase.trim() || undefined,
+      });
+
+      if (v.state === "unsafe") {
+        // TOLAK penyimpanan. Kunci tidak pernah menyentuh localStorage.
+        pushToast(
+          "error",
+          t("settings.keyGuard.rejectedTitle"),
+          `${t("settings.keyGuard.rejectedBody")}${
+            v.matched_permissions.length ? ` (${v.matched_permissions.join(", ")})` : ""
+          }`,
+        );
+        return;
+      }
+      if (v.state === "invalid") {
+        pushToast("error", t("settings.keyGuard.invalidTitle"), v.message);
+        return;
+      }
+
+      persist();
+      if (v.state === "safe") {
+        pushToast("success", t("settings.keyGuard.safeTitle"), v.message);
+      } else {
+        // "unknown" — disimpan, TAPI jangan pernah mengaku terverifikasi aman.
+        pushToast(
+          "info",
+          t("settings.keyGuard.unknownTitle"),
+          `${v.message} ${t("settings.keyGuard.savedAnyway")}`,
+        );
+      }
+    } finally {
+      setValidating(false);
+    }
   };
 
   // Kelas input dipakai berulang — satu sumber kebenaran, bukan copy-paste.
@@ -231,19 +284,28 @@ export default function SettingsPage() {
 
         {/* SAVE BUTTON */}
         <div className="flex justify-end pt-4">
-          <button 
+          <button
             onClick={handleSave}
-            className={`flex items-center gap-2 px-6 py-2.5 font-semibold rounded-lg transition-all duration-300 shadow-sm dark:shadow-none ${
-              isSaved 
-                ? "bg-emerald-600 text-white" 
+            disabled={validating}
+            className={`flex items-center gap-2 px-6 py-2.5 font-semibold rounded-lg transition-all duration-300 shadow-sm dark:shadow-none disabled:opacity-60 disabled:cursor-not-allowed ${
+              isSaved
+                ? "bg-emerald-600 text-white"
                 : "bg-slate-900 text-white hover:bg-slate-800 dark:bg-zinc-100 dark:text-black dark:hover:bg-white"
             }`}
           >
-            {isSaved ? <><Check className="w-4 h-4" /> {t("settings.saved")}</> : <><Save className="w-4 h-4" /> {t("settings.save")}</>}
+            {validating ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> {t("settings.validating")}</>
+            ) : isSaved ? (
+              <><Check className="w-4 h-4" /> {t("settings.saved")}</>
+            ) : (
+              <><Save className="w-4 h-4" /> {t("settings.save")}</>
+            )}
           </button>
         </div>
         
       </div>
+
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

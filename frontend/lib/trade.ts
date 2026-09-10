@@ -174,6 +174,71 @@ export type ExchangePosition = {
   notional: number;
 };
 
+// --------------------------------------------------------------------------- //
+// API Key Permission Interceptor
+// --------------------------------------------------------------------------- //
+
+export type KeyValidationState = "safe" | "unsafe" | "unknown" | "invalid";
+
+export type KeyValidation = {
+  state: KeyValidationState;
+  exchange_id: string;
+  withdraw: boolean | null;
+  transfer: boolean | null;
+  read_only: boolean | null;
+  checked_via: string;
+  matched_permissions: string[];
+  message: string;
+};
+
+/**
+ * Tanya backend apakah kunci ini boleh disimpan.
+ *
+ * Backend membalas 403 kalau izin withdraw/transfer masih aktif dan 400 kalau
+ * bursa menolak kuncinya — keduanya dinormalisasi jadi objek KeyValidation
+ * supaya pemanggil menangani satu bentuk saja. Kegagalan jaringan menjadi
+ * "unknown": TIDAK memblokir user, tapi juga TIDAK mengklaim kunci aman.
+ */
+export async function validateExchangeKeys(params: {
+  exchange_id: string;
+  api_key: string;
+  secret_key: string;
+  passphrase?: string;
+}): Promise<KeyValidation> {
+  const fallback = (state: KeyValidationState, message: string): KeyValidation => ({
+    state,
+    exchange_id: params.exchange_id,
+    withdraw: null,
+    transfer: null,
+    read_only: null,
+    checked_via: "client",
+    matched_permissions: [],
+    message,
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/v1/trade/validate-keys`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+  } catch {
+    return fallback("unknown", "Server validasi ORACLE tidak bisa dihubungi.");
+  }
+
+  const body = await res.json().catch(() => null);
+  // 403/400 membawa payload verdict di `detail`.
+  const payload = body?.detail && typeof body.detail === "object" ? body.detail : body;
+  if (payload && typeof payload.state === "string") return payload as KeyValidation;
+
+  if (res.ok) return fallback("unknown", "Respons validasi tidak dikenali.");
+  return fallback(
+    res.status === 403 ? "unsafe" : res.status === 400 ? "invalid" : "unknown",
+    typeof body?.detail === "string" ? body.detail : `HTTP ${res.status}`,
+  );
+}
+
 export type ExchangeAccount = {
   status: "ok" | "unavailable";
   exchange_id: string;

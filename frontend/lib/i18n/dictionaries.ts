@@ -274,6 +274,14 @@ export const en = {
   "settings.warning.withdraw": "disable Withdraw",
   "settings.save": "Save Configuration",
   "settings.saved": "Configuration Saved!",
+  "settings.validating": "Verifying key permissions…",
+  "settings.keyGuard.rejectedTitle": "ORACLE security rejected this key",
+  "settings.keyGuard.rejectedBody":
+    "Please disable the Withdraw permission in your exchange settings, for the safety of your funds.",
+  "settings.keyGuard.invalidTitle": "Exchange rejected these keys",
+  "settings.keyGuard.unknownTitle": "Permissions could not be verified",
+  "settings.keyGuard.safeTitle": "Keys verified — no withdrawal access",
+  "settings.keyGuard.savedAnyway": "Saved, but verify the Withdraw permission yourself.",
 
   // ------------------------------------------------------------------ //
   // Modal Upgrade PRO (billing)
@@ -597,6 +605,14 @@ export const id: Record<TranslationKey, string> = {
   "settings.warning.withdraw": "matikan Withdraw",
   "settings.save": "Simpan Konfigurasi",
   "settings.saved": "Konfigurasi Tersimpan!",
+  "settings.validating": "Memeriksa izin kunci…",
+  "settings.keyGuard.rejectedTitle": "Keamanan ORACLE menolak kunci ini",
+  "settings.keyGuard.rejectedBody":
+    "Mohon matikan izin Withdraw/Penarikan di pengaturan bursa Anda demi keamanan dana Anda.",
+  "settings.keyGuard.invalidTitle": "Bursa menolak kunci ini",
+  "settings.keyGuard.unknownTitle": "Izin kunci tidak bisa diverifikasi",
+  "settings.keyGuard.safeTitle": "Kunci terverifikasi — tanpa akses penarikan",
+  "settings.keyGuard.savedAnyway": "Tersimpan, tapi pastikan sendiri izin Withdraw sudah mati.",
 
   // ------------------------------------------------------------------ //
   // Modal Upgrade PRO (billing)
