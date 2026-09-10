@@ -439,6 +439,9 @@ class TradeEngine:
                 credentials=credentials,
                 testnet=testnet,
             )
+            # SL/TP dititipkan NATIVE ke bursa (conditional order), bukan
+            # dijaga polling lokal — lihat place_order() untuk alasannya.
+            tp_targets = proposal.get("take_profit_targets") or []
             result = await asyncio.to_thread(
                 place_order,
                 exchange,
@@ -449,6 +452,8 @@ class TradeEngine:
                 price=proposal["entry_price"],
                 leverage=proposal["applied_leverage"],
                 market_type=market_type,
+                stop_loss=proposal["stop_loss_price"],
+                take_profit=tp_targets[0] if tp_targets else None,
             )
         except MissingCredentials:
             raise
@@ -464,6 +469,9 @@ class TradeEngine:
             "status": "OPEN",
             "filled_price": result.get("filled_price") or proposal["entry_price"],
             "exchange_ref": result.get("id"),
+            # Status proteksi native: dipakai UI untuk memastikan posisi live
+            # benar-benar punya stop di sisi bursa.
+            "protection": result.get("protection"),
         }
 
 

@@ -284,6 +284,26 @@ def to_ccxt_symbol(symbol: str, market_type: str, quote: str = "USDT") -> str:
     return f"{pair}:{q}" if mt in ("futures", "swap", "perpetual", "future") else pair
 
 
+def sl_tp_capability(exchange: Any) -> str:
+    """
+    Bagaimana bursa ini bisa memasang SL/TP NATIVE?
+
+      "atomic"   -> SL & TP menempel pada order entry dalam SATU panggilan.
+                    Tidak ada jendela waktu posisi tanpa proteksi.
+      "separate" -> perlu conditional order terpisah setelah entry terisi.
+      "none"     -> bursa tidak punya conditional order sama sekali.
+
+    Dibaca dari flag kapabilitas CCXT, bukan daftar hardcoded, supaya ikut
+    terbarui saat CCXT menambah dukungan.
+    """
+    has = getattr(exchange, "has", {}) or {}
+    if has.get("createOrderWithTakeProfitAndStopLoss"):
+        return "atomic"
+    if has.get("createStopLossOrder") or has.get("createStopOrder"):
+        return "separate"
+    return "none"
+
+
 def place_order(
     exchange: Any,
     *,
@@ -294,29 +314,132 @@ def place_order(
     price: float | None,
     leverage: int | None,
     market_type: str,
+    stop_loss: float | None = None,
+    take_profit: float | None = None,
 ) -> dict[str, Any]:
-    """create_order generik lintas bursa. CCXT menerjemahkan ke API bursa."""
+    """
+    Kirim order entry + proteksi SL/TP NATIVE ke bursa.
+
+    KENAPA NATIVE, BUKAN POLLING LOKAL: stop yang dijaga server kita sendiri
+    baru bereaksi setelah polling berikutnya dan hanya hidup selama proses kita
+    hidup. Stop yang dititipkan ke matching engine bursa dieksekusi di sana,
+    dalam milidetik, dan tetap berlaku walau ORACLE mati total. Untuk uang
+    sungguhan, hanya yang kedua yang layak.
+
+    Kontrak keselamatan: kalau bursa TIDAK bisa memasang stop native, fungsi
+    ini menolak SEBELUM entry dikirim — lebih baik gagal membuka posisi
+    daripada memegang posisi live tanpa stop.
+    """
     is_futures = (market_type or "spot").lower() in (
         "futures", "swap", "perpetual", "future"
     )
+    mode = sl_tp_capability(exchange)
+    ex_name = getattr(exchange, "id", "exchange")
+
+    # --- Pre-flight: jangan pernah membuka posisi yang tak bisa dilindungi ---
+    if stop_loss and mode == "none":
+        raise ExchangeAdapterError(
+            f"{ex_name.upper()} tidak mendukung conditional order, jadi Stop Loss "
+            "tidak bisa dititipkan ke bursa. ORACLE menolak membuka posisi LIVE "
+            "tanpa proteksi stop native."
+        )
+
     if is_futures and leverage:
         try:
             exchange.set_leverage(int(leverage), symbol)
         except Exception:
             logger.warning("set_leverage %sx gagal untuk %s (lanjut).", leverage, symbol, exc_info=True)
 
+    otype = order_type.lower()
+    oside = side.lower()
+    limit_price = price if order_type.upper() == "LIMIT" else None
+    protection: dict[str, Any] = {"mode": mode, "stop_loss": None, "take_profit": None}
+
+    # --- Jalur ATOMIC: SL/TP menempel di order entry (bybit, okx) ---------- #
+    if stop_loss and mode == "atomic":
+        order = exchange.create_order_with_take_profit_and_stop_loss(
+            symbol, otype, oside, amount, limit_price,
+            take_profit, stop_loss, {},
+        )
+        protection.update(
+            stop_loss="attached", take_profit="attached" if take_profit else None
+        )
+        return _order_result(order, protection)
+
+    # --- Entry biasa ------------------------------------------------------- #
     order = exchange.create_order(
-        symbol=symbol,
-        type=order_type.lower(),
-        side=side.lower(),
-        amount=amount,
-        price=price if order_type.upper() == "LIMIT" else None,
-        params={},
+        symbol=symbol, type=otype, side=oside, amount=amount,
+        price=limit_price, params={},
     )
+
+    if not stop_loss:
+        return _order_result(order, protection)
+
+    # --- Jalur SEPARATE: conditional order reduce-only setelah entry ------- #
+    # Sisi berlawanan: posisi BUY ditutup dengan SELL, dan sebaliknya.
+    exit_side = "sell" if oside == "buy" else "buy"
+    reduce_params = {"reduceOnly": True} if is_futures else {}
+
+    try:
+        sl_order = exchange.create_stop_loss_order(
+            symbol, "market", exit_side, amount, None, stop_loss, dict(reduce_params)
+        )
+        protection["stop_loss"] = "placed"
+        protection["stop_loss_id"] = sl_order.get("id")
+    except Exception as exc:
+        # Entry SUDAH terisi tapi stop GAGAL: posisi live tanpa proteksi.
+        # Ini keadaan darurat — jangan didiamkan, jangan pula ditelan diam-diam.
+        logger.error(
+            "KRITIS: entry %s terisi tapi Stop Loss GAGAL dipasang (%s). "
+            "Mencoba menutup posisi kembali.", symbol, type(exc).__name__,
+        )
+        protection["stop_loss"] = "FAILED"
+        protection["stop_loss_error"] = type(exc).__name__
+        try:
+            exchange.create_order(
+                symbol=symbol, type="market", side=exit_side, amount=amount,
+                price=None, params=dict(reduce_params),
+            )
+            protection["unwound"] = True
+            raise ExchangeAdapterError(
+                f"Stop Loss gagal dipasang di {ex_name.upper()} "
+                f"({type(exc).__name__}). Posisi langsung DITUTUP kembali agar "
+                "tidak menggantung tanpa proteksi. Tidak ada posisi terbuka."
+            ) from exc
+        except ExchangeAdapterError:
+            raise
+        except Exception as unwind_exc:
+            protection["unwound"] = False
+            raise ExchangeAdapterError(
+                f"BAHAYA: posisi {symbol} TERBUKA di {ex_name.upper()} tanpa Stop "
+                f"Loss, dan penutupan darurat juga gagal ({type(unwind_exc).__name__}). "
+                "Tutup posisi ini MANUAL di bursa sekarang juga."
+            ) from unwind_exc
+
+    if take_profit:
+        try:
+            tp_order = exchange.create_take_profit_order(
+                symbol, "market", exit_side, amount, None, take_profit, dict(reduce_params)
+            )
+            protection["take_profit"] = "placed"
+            protection["take_profit_id"] = tp_order.get("id")
+        except Exception as exc:
+            # TP gagal tidak fatal: stop (pelindung kerugian) sudah terpasang.
+            logger.warning(
+                "Take Profit %s gagal dipasang (%s); posisi tetap terlindungi SL.",
+                symbol, type(exc).__name__,
+            )
+            protection["take_profit"] = "failed"
+
+    return _order_result(order, protection)
+
+
+def _order_result(order: dict[str, Any], protection: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": order.get("id"),
         "filled_price": order.get("average") or order.get("price"),
         "status": order.get("status"),
+        "protection": protection,
         "raw": {k: order.get(k) for k in ("id", "symbol", "type", "side", "amount", "status")},
     }
 

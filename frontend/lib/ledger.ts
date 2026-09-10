@@ -34,6 +34,12 @@ export type LedgerRow = {
   allocated_margin_usdt: number;
   applied_leverage: number;
   realized_pnl_usdt?: number;
+  /** PnL sebelum fee (paper). */
+  gross_pnl_usdt?: number;
+  /** Total fee simulasi (buka + tutup) — 0 untuk baris LIVE. */
+  fees_usdt?: number;
+  /** Catatan otomatis saat posisi ditutup. */
+  notes?: string;
   exit_price?: number;
   created_at: string;
   closed_at?: string;
@@ -72,6 +78,9 @@ function fromPaper(t: PaperTrade, accountId: string): LedgerRow {
     allocated_margin_usdt: t.allocated_margin_usdt,
     applied_leverage: t.applied_leverage,
     realized_pnl_usdt: t.realized_pnl_usdt,
+    gross_pnl_usdt: t.gross_pnl_usdt,
+    fees_usdt: (t.fee_open_usdt ?? 0) + (t.fee_close_usdt ?? 0),
+    notes: t.notes,
     exit_price: t.exit_price,
     created_at: t.created_at,
     closed_at: t.closed_at,

@@ -1,16 +1,17 @@
 ﻿"use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2, Wallet } from "lucide-react";
+import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2, Wallet, Download } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
   fetchJournal, fetchAccount, fetchLivePrices, fetchExchangeAccount,
   type TradeRecord, type ExchangeAccount,
 } from "@/lib/trade";
 import {
-  getPaperTrades, syncPaperTrades, closePaperTrade,
+  getPaperTrades, syncPaperTrades, closePaperTrade, roundTripFee,
   PAPER_LEDGER_EVENT, type PaperTrade,
 } from "@/lib/paper-ledger";
+import { journalRowsToCsv, downloadCsv } from "@/lib/csv-export";
 import { buildUnifiedLedger, type LedgerRow } from "@/lib/ledger";
 import { getWorkspace, credentialsStatus } from "@/lib/workspace";
 import { CloseTradeModal } from "@/components/journal/close-trade-modal";
@@ -60,11 +61,18 @@ type PnlInput = {
 const entryOf = (t: PnlInput) => t.filled_price ?? t.entry_price;
 
 /** Unrealized PnL untuk posisi OPEN pada harga live. */
-function floatingPnl(t: PnlInput, cur: number | undefined): number | null {
+function floatingPnl(
+  t: PnlInput,
+  cur: number | undefined,
+  chargeFees = false,
+): number | null {
   if (t.status !== "OPEN" || typeof cur !== "number" || !Number.isFinite(cur)) return null;
   const entry = entryOf(t);
   const size = t.position_size_coin;
-  return t.side === "BUY" ? (cur - entry) * size : (entry - cur) * size;
+  const gross = t.side === "BUY" ? (cur - entry) * size : (entry - cur) * size;
+  // Posisi paper: kurangi fee masuk + fee keluar yang pasti dibayar saat
+  // ditutup. Tanpa ini angka di layar adalah profit yang tidak pernah ada.
+  return chargeFees ? gross - roundTripFee(entry, cur, size) : gross;
 }
 
 /** Return on Equity (margin) dalam %. */
@@ -221,7 +229,7 @@ export default function JournalPage() {
       const pnl =
         t.source === "exchange" && typeof t.live_unrealized_pnl === "number"
           ? t.live_unrealized_pnl
-          : floatingPnl(t, livePrices[t.symbol]);
+          : floatingPnl(t, livePrices[t.symbol], t.tradeType === "PAPER");
       return sum + (pnl ?? 0);
     }, 0);
     return { totalFloating: tf, totalEquity: baseBalance + tf };
@@ -230,18 +238,36 @@ export default function JournalPage() {
   }, [unifiedRows, baseBalance, livePrices, priceTick]);
 
   // Tutup PAPER trade di sisi klien (localStorage), PnL vs harga live/manual.
-  const handlePaperClose = (row: LedgerRow, exitPrice: number, pnl: number) => {
-    const rec = closePaperTrade(row.id, exitPrice, pnl);
+  const handlePaperClose = (row: LedgerRow, exitPrice: number) => {
+    // PnL & fee dihitung di dalam closePaperTrade — halaman tidak boleh
+    // menyodorkan angka sendiri, supaya fee tak bisa terlewat.
+    const rec = closePaperTrade(row.id, exitPrice);
     setCloseTarget(null);
     if (!rec) {
       pushToast("error", "Gagal menutup posisi paper", "Trade tidak ditemukan di ledger lokal.");
       return;
     }
     setPaperTrades(getPaperTrades());
+    const net = rec.realized_pnl_usdt ?? 0;
+    const fees = (rec.fee_open_usdt ?? 0) + (rec.fee_close_usdt ?? 0);
     pushToast(
       "success",
       `${row.symbol} (PAPER) ditutup`,
-      `Exit $${money(exitPrice, 4)} · PnL ${pnl >= 0 ? "+" : "-"}$${money(Math.abs(pnl))}`,
+      `Exit $${money(exitPrice, 4)} · PnL bersih ${net >= 0 ? "+" : "-"}$${money(Math.abs(net))} (fee $${money(fees)})`,
+    );
+  };
+
+  // --- Export CSV ---------------------------------------------------------
+  const handleExportCsv = () => {
+    if (unifiedRows.length === 0) {
+      pushToast("info", tr("journal.export.emptyTitle"), tr("journal.export.emptyBody"));
+      return;
+    }
+    downloadCsv("ORACLE_Trading_Journal.csv", journalRowsToCsv(unifiedRows));
+    pushToast(
+      "success",
+      tr("journal.export.doneTitle"),
+      tr("journal.export.doneBody").replace("{count}", String(unifiedRows.length)),
     );
   };
 
@@ -405,9 +431,21 @@ export default function JournalPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
               <Zap className="w-4 h-4 text-emerald-500" /> {tr("journal.ledgerTitle")}
             </h2>
-            <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              {tr("journal.liveRefresh")}
+            <div className="flex items-center gap-3">
+              <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                {tr("journal.liveRefresh")}
+              </div>
+              <button
+                onClick={handleExportCsv}
+                title={tr("journal.export.title")}
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg border transition-colors
+                  border-slate-200 text-slate-600 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50
+                  dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-emerald-500/50 dark:hover:text-emerald-400 dark:hover:bg-emerald-900/20"
+              >
+                <Download className="w-3.5 h-3.5" />
+                {tr("journal.export")}
+              </button>
             </div>
           </div>
 
@@ -441,6 +479,9 @@ export default function JournalPage() {
                   }`}
                 >
                   {totalFloating >= 0 ? "+" : "-"}${money(Math.abs(totalFloating))}
+                </p>
+                <p className="text-[10px] text-slate-400 dark:text-zinc-500">
+                  {tr("journal.feesNote")}
                 </p>
               </div>
 
@@ -509,19 +550,20 @@ export default function JournalPage() {
                 <th className="p-3 font-medium">{tr("journal.table.margin")}</th>
                 <th className="p-3 font-medium">{tr("journal.table.status")}</th>
                 <th className="p-3 font-medium">{tr("journal.table.pnl")}</th>
+                <th className="p-3 font-medium">{tr("journal.table.notes")}</th>
                 <th className="p-3 font-medium"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/50">
               {execLoading ? (
                 <tr>
-                  <td colSpan={12} className="p-8 text-center text-slate-400 dark:text-zinc-500">
+                  <td colSpan={13} className="p-8 text-center text-slate-400 dark:text-zinc-500">
                     <Loader2 className="w-5 h-5 animate-spin inline" />
                   </td>
                 </tr>
               ) : unifiedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="p-8 text-center text-slate-400 dark:text-zinc-500">
+                  <td colSpan={13} className="p-8 text-center text-slate-400 dark:text-zinc-500">
                     {tr("journal.emptyLedger")}
                   </td>
                 </tr>
@@ -531,7 +573,7 @@ export default function JournalPage() {
                   const fPnl =
                     t.source === "exchange" && typeof t.live_unrealized_pnl === "number"
                       ? t.live_unrealized_pnl
-                      : floatingPnl(t, cur);
+                      : floatingPnl(t, cur, t.tradeType === "PAPER");
                   const fRoe = roePct(t, fPnl);
                   const isOpen = t.status === "OPEN";
                   const curShown = t.source === "exchange" ? t.live_mark_price : cur;
@@ -625,6 +667,18 @@ export default function JournalPage() {
                         </span>
                       ) : (
                         <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="p-3 max-w-[260px]">
+                      {t.notes ? (
+                        <span
+                          title={t.notes}
+                          className="block truncate text-[11px] text-slate-500 dark:text-zinc-400"
+                        >
+                          {t.notes}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 dark:text-zinc-700">—</span>
                       )}
                     </td>
                     <td className="p-3">
@@ -874,7 +928,7 @@ export default function JournalPage() {
         onDone={handleCloseDone}
         onLocalClose={
           closeTarget
-            ? (exit, pnl) => handlePaperClose(closeTarget, exit, pnl)
+            ? (exit) => handlePaperClose(closeTarget, exit)
             : undefined
         }
       />
