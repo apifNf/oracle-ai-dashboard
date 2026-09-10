@@ -82,6 +82,21 @@ class ExchangeAccountRequest(BaseModel):
     passphrase: str | None = Field(default=None, repr=False)
 
 
+class EditStopLossRequest(BaseModel):
+    # Geser SL order LIVE yang aktif ke harga baru (dipicu Smart-Stop watchdog
+    # frontend). MUTASI akun bursa asli -> di-gate trade_live_enabled.
+    exchange_id: str | None = None
+    market_type: Literal["spot", "futures"] | None = None
+    symbol: str                          # "BTCUSDT" / "BTC/USDT"
+    side: Literal["BUY", "SELL"]         # sisi POSISI, bukan sisi order stop
+    amount: float                        # ukuran posisi (untuk membentuk order stop)
+    new_sl_price: float
+    sl_order_id: str | None = None       # id order SL lama bila diketahui
+    api_key: str | None = Field(default=None, repr=False)
+    secret_key: str | None = Field(default=None, repr=False)
+    passphrase: str | None = Field(default=None, repr=False)
+
+
 # --------------------------------------------------------------------------- #
 # Helper
 # --------------------------------------------------------------------------- #
@@ -398,6 +413,104 @@ async def trade_exchange_account(body: ExchangeAccountRequest) -> dict[str, Any]
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, f"Snapshot bursa gagal: {type(exc).__name__}: {detail}"
         )
+
+
+@router.post("/edit-sl")
+async def trade_edit_sl(body: EditStopLossRequest) -> dict[str, Any]:
+    """
+    Geser Stop Loss order LIVE yang aktif — dipicu Smart Auto-BEP / Trailing
+    watchdog di frontend saat posisi mencapai ambang profit.
+
+    MUTASI akun bursa asli, jadi di-gate `trade_live_enabled` sama seperti
+    /execute. Kredensial user diprioritaskan; tidak pernah disimpan/di-log.
+    """
+    from app.api.execute_trade import (
+        ExchangeAdapterError,
+        MissingCredentials,
+        build_ccxt_exchange,
+        edit_stop_loss,
+        redact,
+        resolve_credentials,
+        validate_route,
+    )
+
+    if not settings.trade_live_enabled:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "LIVE trading dinonaktifkan (TRADE_LIVE_ENABLED=false). SL bursa "
+            "hanya bisa digeser saat live aktif; untuk paper, watchdog frontend "
+            "menanganinya sendiri.",
+        )
+
+    exchange_id = (body.exchange_id or settings.default_exchange_id).strip().lower()
+    market_type = (body.market_type or settings.default_market_type).strip().lower()
+    try:
+        exchange_id, market_type = validate_route(exchange_id, market_type)
+    except ExchangeAdapterError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+    if not (body.new_sl_price > 0 and body.amount > 0):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "new_sl_price dan amount harus angka positif.",
+        )
+
+    server_key = settings.exchange_api_key
+    server_secret = settings.exchange_api_secret
+    server_pass = settings.exchange_api_password
+    if not (server_key and server_secret) and exchange_id == "binance":
+        server_key, server_secret, server_pass = (
+            settings.binance_api_key, settings.binance_api_secret, None
+        )
+
+    try:
+        creds = resolve_credentials(
+            exchange_id,
+            user_key=body.api_key,
+            user_secret=body.secret_key,
+            user_passphrase=body.passphrase,
+            server_key=server_key,
+            server_secret=server_secret,
+            server_passphrase=server_pass,
+            allow_server_fallback=settings.exchange_allow_server_keys,
+        )
+    except MissingCredentials as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+    from app.api.execute_trade import to_ccxt_symbol
+
+    def _run() -> dict[str, Any]:
+        exchange = build_ccxt_exchange(
+            exchange_id, market_type,
+            credentials=creds,
+            testnet=bool(settings.exchange_testnet or settings.binance_testnet),
+        )
+        ccxt_symbol = to_ccxt_symbol(body.symbol, market_type)
+        return edit_stop_loss(
+            exchange,
+            symbol=ccxt_symbol,
+            position_side=body.side,
+            amount=float(body.amount),
+            new_stop_price=float(body.new_sl_price),
+            market_type=market_type,
+            sl_order_id=body.sl_order_id,
+        )
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except ExchangeAdapterError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            redact(exc, body.api_key, body.secret_key, body.passphrase),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Gagal menggeser SL: {type(exc).__name__}: "
+            + redact(exc, body.api_key, body.secret_key, body.passphrase),
+        )
+
+    return {"status": "ok", "exchange_id": exchange_id, **result}
 
 
 @router.post("/close")

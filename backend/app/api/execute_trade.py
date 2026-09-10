@@ -47,6 +47,7 @@ __all__ = [
     "build_ccxt_exchange",
     "to_ccxt_symbol",
     "place_order",
+    "edit_stop_loss",
     "fetch_exchange_account",
     "futures_default_type",
     "validate_route",
@@ -304,6 +305,22 @@ def sl_tp_capability(exchange: Any) -> str:
     return "none"
 
 
+def _native_trailing_params(exchange: Any, trailing_percent: float | None) -> dict[str, Any]:
+    """
+    Param trailing-stop NATIVE bila didukung CCXT untuk bursa ini.
+
+    Bybit v5 & OKX menerima `trailingPercent` di params create_order (CCXT
+    menormalkannya). Kalau tidak didukung, kembalikan {} — watchdog frontend
+    yang jadi mekanisme trailing utama (lihat SmartStop di lib/paper-ledger.ts
+    dan endpoint /trade/edit-sl).
+    """
+    if not trailing_percent or trailing_percent <= 0:
+        return {}
+    if getattr(exchange, "id", "") in ("bybit", "okx"):
+        return {"trailingPercent": trailing_percent}
+    return {}
+
+
 def place_order(
     exchange: Any,
     *,
@@ -316,6 +333,7 @@ def place_order(
     market_type: str,
     stop_loss: float | None = None,
     take_profit: float | None = None,
+    trailing_percent: float | None = None,
 ) -> dict[str, Any]:
     """
     Kirim order entry + proteksi SL/TP NATIVE ke bursa.
@@ -353,13 +371,17 @@ def place_order(
     otype = order_type.lower()
     oside = side.lower()
     limit_price = price if order_type.upper() == "LIMIT" else None
-    protection: dict[str, Any] = {"mode": mode, "stop_loss": None, "take_profit": None}
+    trailing = _native_trailing_params(exchange, trailing_percent)
+    protection: dict[str, Any] = {
+        "mode": mode, "stop_loss": None, "take_profit": None,
+        "trailing": "native" if trailing else None,
+    }
 
     # --- Jalur ATOMIC: SL/TP menempel di order entry (bybit, okx) ---------- #
     if stop_loss and mode == "atomic":
         order = exchange.create_order_with_take_profit_and_stop_loss(
             symbol, otype, oside, amount, limit_price,
-            take_profit, stop_loss, {},
+            take_profit, stop_loss, dict(trailing),
         )
         protection.update(
             stop_loss="attached", take_profit="attached" if take_profit else None
@@ -441,6 +463,119 @@ def _order_result(order: dict[str, Any], protection: dict[str, Any]) -> dict[str
         "status": order.get("status"),
         "protection": protection,
         "raw": {k: order.get(k) for k in ("id", "symbol", "type", "side", "amount", "status")},
+    }
+
+
+def edit_stop_loss(
+    exchange: Any,
+    *,
+    symbol: str,
+    position_side: str,
+    amount: float,
+    new_stop_price: float,
+    market_type: str,
+    sl_order_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Geser Stop Loss yang sedang aktif di bursa ke `new_stop_price`.
+
+    `position_side` = sisi POSISI ("BUY"/"SELL"); order stop-nya di sisi
+    berlawanan (posisi BUY ditutup dengan SELL).
+
+    Strategi lintas bursa:
+      1. Kalau bursa punya trading-stop level-posisi (Bybit/OKX) -> pakai itu:
+         satu panggilan, tidak ada jendela tanpa proteksi.
+      2. Kalau tidak, tapi ada sl_order_id & editOrder didukung -> edit_order.
+      3. Fallback universal: cancel order lama (best-effort) -> create stop baru.
+
+    Mengembalikan {method, sl_order_id, new_stop_price}. Melempar
+    ExchangeAdapterError kalau semua jalur gagal — pemanggil harus memberi
+    tahu user bahwa SL BELUM bergeser.
+    """
+    ex_id = getattr(exchange, "id", "exchange")
+    is_futures = (market_type or "spot").lower() in (
+        "futures", "swap", "perpetual", "future"
+    )
+    exit_side = "sell" if str(position_side).upper() == "BUY" else "buy"
+    reduce_params = {"reduceOnly": True} if is_futures else {}
+
+    # --- Jalur 1: trading-stop level posisi (Bybit v5, OKX) --------------- #
+    # Aman & atomik: mengubah SL yang menempel pada posisi, bukan order.
+    if ex_id in ("bybit", "okx") and is_futures:
+        try:
+            params = {"stopLoss": exchange.price_to_precision(symbol, new_stop_price)}
+            if ex_id == "bybit":
+                exchange.private_post_v5_position_trading_stop({
+                    "category": "linear",
+                    "symbol": exchange.market_id(symbol),
+                    "stopLoss": params["stopLoss"],
+                    "positionIdx": 0,
+                })
+            else:  # okx
+                exchange.set_trading_stop  # type: ignore[attr-defined]
+                exchange.private_post_trade_order_algo({
+                    "instId": exchange.market_id(symbol),
+                    "tdMode": "cross",
+                    "side": exit_side,
+                    "ordType": "conditional",
+                    "slTriggerPx": params["stopLoss"],
+                    "slOrdPx": "-1",
+                    "closeFraction": "1",
+                })
+            return {
+                "method": "position_trading_stop",
+                "sl_order_id": sl_order_id,
+                "new_stop_price": new_stop_price,
+            }
+        except Exception as exc:
+            logger.warning(
+                "trading-stop level posisi %s gagal (%s); coba jalur order.",
+                ex_id, type(exc).__name__,
+            )
+
+    # --- Jalur 2: edit_order langsung ----------------------------------- #
+    if sl_order_id and (getattr(exchange, "has", {}) or {}).get("editOrder"):
+        try:
+            edited = exchange.edit_order(
+                sl_order_id, symbol, "market", exit_side, amount, None,
+                {**reduce_params, "stopLossPrice": new_stop_price,
+                 "triggerPrice": new_stop_price},
+            )
+            return {
+                "method": "edit_order",
+                "sl_order_id": edited.get("id") or sl_order_id,
+                "new_stop_price": new_stop_price,
+            }
+        except Exception as exc:
+            logger.warning(
+                "edit_order SL %s gagal (%s); fallback cancel+create.",
+                symbol, type(exc).__name__,
+            )
+
+    # --- Jalur 3: cancel lama + create baru (universal) ---------------- #
+    if sl_order_id:
+        try:
+            exchange.cancel_order(sl_order_id, symbol)
+        except Exception:
+            # Order mungkin sudah tidak ada / sudah tereksekusi; lanjut saja.
+            logger.debug("cancel_order %s (lama) gagal — lanjut buat SL baru.", sl_order_id)
+
+    try:
+        fresh = exchange.create_stop_loss_order(
+            symbol, "market", exit_side, amount, None, new_stop_price,
+            dict(reduce_params),
+        )
+    except Exception as exc:
+        raise ExchangeAdapterError(
+            f"Gagal memasang Stop Loss baru di {ex_id.upper()} "
+            f"({type(exc).__name__}). SL LAMA mungkin sudah dibatalkan — "
+            "periksa posisi di bursa."
+        ) from exc
+
+    return {
+        "method": "cancel_recreate",
+        "sl_order_id": fresh.get("id"),
+        "new_stop_price": new_stop_price,
     }
 
 

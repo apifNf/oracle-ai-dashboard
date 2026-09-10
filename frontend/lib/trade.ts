@@ -276,6 +276,44 @@ export async function fetchExchangeAccount(): Promise<ExchangeAccount | null> {
   }
 }
 
+export type EditSlResult = {
+  status: "ok";
+  exchange_id: string;
+  method: "position_trading_stop" | "edit_order" | "cancel_recreate";
+  sl_order_id: string | null;
+  new_stop_price: number;
+};
+
+/**
+ * Geser Stop Loss order LIVE yang aktif di bursa (dipicu Smart-Stop watchdog).
+ * Kredensial diambil dari localStorage. Melempar Error kalau backend menolak
+ * (mis. TRADE_LIVE_ENABLED=false) atau bursa gagal.
+ */
+export async function editStopLoss(params: {
+  symbol: string;
+  side: TradeSide;
+  amount: number;
+  new_sl_price: number;
+  sl_order_id?: string | null;
+  exchange_id?: string;
+  market_type?: MarketType;
+}): Promise<EditSlResult> {
+  const ws = getWorkspace();
+  const creds = getExchangeCredentials();
+  return post("/api/v1/trade/edit-sl", {
+    exchange_id: params.exchange_id ?? ws.exchange,
+    market_type: params.market_type ?? ws.environment,
+    symbol: params.symbol,
+    side: params.side,
+    amount: params.amount,
+    new_sl_price: params.new_sl_price,
+    sl_order_id: params.sl_order_id ?? null,
+    api_key: creds.api_key,
+    secret_key: creds.secret_key,
+    passphrase: creds.passphrase,
+  }) as Promise<EditSlResult>;
+}
+
 export async function fetchJournal(accountId: string, limit = 100) {
   const res = await fetch(
     `${API_BASE}/api/v1/trade/journal?account_id=${encodeURIComponent(accountId)}&limit=${limit}`,

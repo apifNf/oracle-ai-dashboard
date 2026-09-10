@@ -1,14 +1,15 @@
 ﻿"use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2, Wallet, Download } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
-  fetchJournal, fetchAccount, fetchLivePrices, fetchExchangeAccount,
+  fetchJournal, fetchAccount, fetchLivePrices, fetchExchangeAccount, editStopLoss,
   type TradeRecord, type ExchangeAccount,
 } from "@/lib/trade";
 import {
   getPaperTrades, syncPaperTrades, closePaperTrade, roundTripFee,
+  applySmartStop, evaluateSmartStop,
   PAPER_LEDGER_EVENT, type PaperTrade,
 } from "@/lib/paper-ledger";
 import { journalRowsToCsv, downloadCsv } from "@/lib/csv-export";
@@ -85,6 +86,14 @@ const money = (v: number | null | undefined, d = 2) =>
   typeof v === "number" && Number.isFinite(v)
     ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })
     : "—";
+
+/** tier Smart-Stop -> kunci kamus toast (typed, bukan template string). */
+const smartStopKey = (tier: "BEP" | "TRAIL" | "CONTINUOUS"): TranslationKey =>
+  tier === "BEP"
+    ? "journal.smartStop.bep"
+    : tier === "TRAIL"
+    ? "journal.smartStop.trail"
+    : "journal.smartStop.continuous";
 
 export default function JournalPage() {
   // Dinamai `tr`, BUKAN `t`: di file ini `t` sudah dipakai sebagai nama
@@ -219,6 +228,87 @@ export default function JournalPage() {
       clearInterval(t);
     };
   }, [openSymbolsKey]);
+
+  // ===================================================================== //
+  // Smart Auto-BEP & Trailing Stop — WATCHDOG
+  //
+  // Setiap tick harga: untuk tiap posisi OPEN, hitung apakah SL harus digeser
+  // (BEP di ROE +10%, kunci +5% di ROE +20%, lalu trailing ~12.5% ROE di
+  // belakang high-water mark). PAPER -> geser di localStorage. LIVE -> POST
+  // /trade/edit-sl ke bursa. Semua sudah arah-sadar di evaluateSmartStop().
+  // ===================================================================== //
+  const liveHwm = useRef<Map<string, number>>(new Map());     // HWM per baris LIVE
+  const liveSlSent = useRef<Map<string, number>>(new Map());  // SL terakhir yg dikirim
+  const liveEditInFlight = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (priceTick === 0) return;
+    let cancelled = false;
+
+    for (const row of unifiedRows) {
+      if (row.status !== "OPEN") continue;
+      const price = livePrices[row.symbol];
+      if (typeof price !== "number" || !Number.isFinite(price)) continue;
+
+      if (row.source === "paper") {
+        const res = applySmartStop(row.id, price);
+        if (res?.moved && res.tier) {
+          setPaperTrades(getPaperTrades());
+          pushToast(
+            "success",
+            tr("journal.smartStop.title"),
+            tr(smartStopKey(res.tier)).replace("{price}", money(res.new_sl, 4)),
+          );
+        }
+        continue;
+      }
+
+      // --- Baris LIVE (backend / posisi bursa) ---
+      if (!hasExchangeKeys) continue;
+      const prevHwm = liveHwm.current.get(row.id) ?? row.entry_price;
+      const res = evaluateSmartStop({ ...row, hwm_price: prevHwm }, price);
+      if (!res) continue;
+      liveHwm.current.set(row.id, res.hwm_price);
+      if (!res.moved || !res.tier) continue;
+
+      // Dedupe: jangan kirim SL yang sama berulang, dan jangan tumpuk request.
+      if (liveSlSent.current.get(row.id) === res.new_sl) continue;
+      if (liveEditInFlight.current.has(row.id)) continue;
+      liveEditInFlight.current.add(row.id);
+
+      editStopLoss({
+        symbol: row.symbol,
+        side: row.side,
+        amount: row.position_size_coin,
+        new_sl_price: res.new_sl,
+        exchange_id: row.exchange_label?.toLowerCase(),
+        market_type: (row.market_type as any) || undefined,
+      })
+        .then((r) => {
+          if (cancelled) return;
+          liveSlSent.current.set(row.id, res.new_sl);
+          pushToast(
+            "success",
+            tr("journal.smartStop.liveTitle"),
+            `${tr(smartStopKey(res.tier!)).replace("{price}", money(res.new_sl, 4))} · ${r.method}`,
+          );
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          pushToast(
+            "error",
+            tr("journal.smartStop.liveFailedTitle"),
+            e instanceof Error ? e.message : String(e),
+          );
+        })
+        .finally(() => liveEditInFlight.current.delete(row.id));
+    }
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceTick, hasExchangeKeys]);
 
   // Agregat floating PnL + Total Equity (net worth), live.
   // Untuk baris posisi bursa pakai PnL dari bursa itu sendiri; sisanya dihitung

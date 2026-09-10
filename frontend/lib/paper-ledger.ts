@@ -63,6 +63,12 @@ export type PaperTrade = {
   realized_pnl_usdt?: number;
   /** Catatan otomatis yang dibuat saat posisi ditutup. */
   notes?: string;
+  /** Harga terbaik yang pernah dicapai posisi (high-water mark) — dasar trailing. */
+  hwm_price?: number;
+  /** Tier proteksi SL yang sudah aktif: BEP | TRAIL | CONTINUOUS. */
+  protection_tier?: "BEP" | "TRAIL" | "CONTINUOUS";
+  /** SL awal sebelum digeser watchdog — untuk audit. */
+  initial_stop_loss?: number;
   /** Bursa/pasar yang jadi acuan simulasi (kosmetik, tidak menyentuh akun asli). */
   market_type?: string;
   exchange_id?: string;
@@ -279,4 +285,168 @@ export function buildAutoNote(t: PaperTrade): string {
 
 export function clearPaperLedger(): void {
   write([]);
+}
+
+/* ========================================================================= *
+ * Smart Auto-BEP & Trailing Stop
+ *
+ * Metrik pemicu: ROE (Return on Equity) = floating PnL / margin dialokasikan,
+ * dalam persen. Dipakai ROE, bukan persentase harga, karena itulah yang
+ * dirasakan trader dan sudah memperhitungkan leverage (ROE = gerak_harga% x lev).
+ *
+ * Aturan pergeseran SL — SEMUA arah-sadar (LONG: SL naik, SHORT: SL turun):
+ *   TIER 1  BEP        : ROE >= +10%  -> SL ke harga ENTRY (kunci modal)
+ *   TIER 2  TRAIL      : ROE >= +20%  -> SL ke harga yang setara ROE +5%
+ *   CONTINUOUS         : SL mengekor ~12.5% ROE di belakang ROE tertinggi
+ *                        yang pernah dicapai (high-water mark)
+ *
+ * RATCHET: SL hanya boleh bergerak ke arah yang MENGAMANKAN, tidak pernah
+ * mundur. LONG -> hanya naik; SHORT -> hanya turun. SL tidak pernah
+ * ditempatkan melewati harga sekarang.
+ * ========================================================================= */
+
+export const BEP_TRIGGER_ROE = 10;       // TIER 1
+export const TRAIL_TRIGGER_ROE = 20;     // TIER 2
+export const TRAIL_LOCK_ROE = 5;         // profit yang dikunci di TIER 2
+// Jarak trailing di belakang high-water mark, dalam poin ROE. Dipilih 15 (ujung
+// atas rentang "10–15%") supaya tiernya MENYAMBUNG mulus: pada HWM = +20% ROE,
+// trailing mengunci tepat +5% — sama dengan TIER 2 — lalu terus naik di atasnya.
+// Nilai lebih kecil akan membuat CONTINUOUS "melompati" TIER 2 di ambang +20%.
+export const CONTINUOUS_GAP_ROE = 15;
+
+export type SmartStopResult = {
+  /** high-water mark harga terbaru (selalu dikembalikan, walau SL tak bergerak). */
+  hwm_price: number;
+  /** SL setelah evaluasi (== SL lama kalau tidak ada pergeseran). */
+  new_sl: number;
+  /** apakah SL benar-benar bergeser pada evaluasi ini. */
+  moved: boolean;
+  /** tier yang memicu pergeseran, kalau ada. */
+  tier: "BEP" | "TRAIL" | "CONTINUOUS" | null;
+  /** ROE (%) yang dikunci SL baru — untuk teks notifikasi. */
+  locked_roe: number | null;
+};
+
+/**
+ * Hitung SL baru untuk satu posisi pada harga terkini. Fungsi MURNI — tidak
+ * menyentuh storage. Return null kalau tidak ada yang berubah (SL tetap, HWM
+ * tetap).
+ */
+export function evaluateSmartStop(
+  t: Pick<
+    PaperTrade,
+    | "side"
+    | "entry_price"
+    | "filled_price"
+    | "stop_loss_price"
+    | "position_size_coin"
+    | "allocated_margin_usdt"
+    | "hwm_price"
+  >,
+  currentPrice: number,
+): SmartStopResult | null {
+  const entry = t.filled_price ?? t.entry_price;
+  const size = t.position_size_coin;
+  const margin = t.allocated_margin_usdt;
+  const curSl = t.stop_loss_price;
+  const isLong = t.side === "BUY";
+
+  if (
+    !(entry > 0) || !(size > 0) || !(margin > 0) || !(currentPrice > 0)
+  ) {
+    return null;
+  }
+
+  const pnlAt = (p: number) => (isLong ? p - entry : entry - p) * size;
+  const roeAt = (p: number) => (pnlAt(p) / margin) * 100;
+  // Harga di mana ROE posisi ini sama dengan `roe` persen.
+  const priceForRoe = (roe: number) =>
+    isLong
+      ? entry + (roe / 100) * (margin / size)
+      : entry - (roe / 100) * (margin / size);
+
+  const curRoe = roeAt(currentPrice);
+
+  // High-water mark: harga TERBAIK yang pernah dicapai (arah favorable).
+  const prevHwm = t.hwm_price ?? entry;
+  const hwmPrice = isLong
+    ? Math.max(prevHwm, currentPrice)
+    : Math.min(prevHwm, currentPrice);
+  const hwmRoe = roeAt(hwmPrice);
+
+  // Kandidat level SL (dalam harga). Pilih yang PALING protektif & valid.
+  const candidates: { price: number; tier: SmartStopResult["tier"] }[] = [];
+  if (curRoe >= BEP_TRIGGER_ROE) {
+    candidates.push({ price: entry, tier: "BEP" });
+  }
+  if (curRoe >= TRAIL_TRIGGER_ROE) {
+    candidates.push({ price: priceForRoe(TRAIL_LOCK_ROE), tier: "TRAIL" });
+  }
+  // CONTINUOUS aktif begitu HWM cukup tinggi sehingga trailing masih di area
+  // profit (di atas kunci TIER 2).
+  if (hwmRoe - CONTINUOUS_GAP_ROE > TRAIL_LOCK_ROE) {
+    candidates.push({
+      price: priceForRoe(hwmRoe - CONTINUOUS_GAP_ROE),
+      tier: "CONTINUOUS",
+    });
+  }
+
+  let best = curSl;
+  let bestTier: SmartStopResult["tier"] = null;
+  for (const c of candidates) {
+    // Jangan pernah taruh SL melewati harga sekarang.
+    const behindPrice = isLong ? c.price < currentPrice : c.price > currentPrice;
+    if (!behindPrice) continue;
+    // Ratchet: hanya bergerak ke arah aman.
+    const improves = isLong ? c.price > best : c.price < best;
+    if (improves) {
+      best = c.price;
+      bestTier = c.tier;
+    }
+  }
+
+  const round = (n: number) => Math.round(n * 1e8) / 1e8;
+  const moved = round(best) !== round(curSl);
+  const hwmChanged = round(hwmPrice) !== round(prevHwm);
+  if (!moved && !hwmChanged) return null;
+
+  return {
+    hwm_price: round(hwmPrice),
+    new_sl: round(best),
+    moved,
+    tier: moved ? bestTier : null,
+    locked_roe: moved ? Math.round(roeAt(best) * 10) / 10 : null,
+  };
+}
+
+/**
+ * Terapkan evaluasi Smart Stop ke satu paper trade di localStorage.
+ * Dipanggil watchdog frontend tiap tick harga. Mengembalikan hasil evaluasi
+ * (untuk toast) atau null kalau tidak ada perubahan / trade tidak layak.
+ */
+export function applySmartStop(
+  id: string,
+  currentPrice: number,
+): SmartStopResult | null {
+  const list = read();
+  const idx = list.findIndex((t) => t.id === id);
+  if (idx < 0 || list[idx].status !== "OPEN") return null;
+
+  const t = list[idx];
+  const res = evaluateSmartStop(t, currentPrice);
+  if (!res) return null;
+
+  list[idx] = {
+    ...t,
+    hwm_price: res.hwm_price,
+    ...(res.moved
+      ? {
+          initial_stop_loss: t.initial_stop_loss ?? t.stop_loss_price,
+          stop_loss_price: res.new_sl,
+          protection_tier: res.tier ?? t.protection_tier,
+        }
+      : {}),
+  };
+  write(list);
+  return res;
 }
