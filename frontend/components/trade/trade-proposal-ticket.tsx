@@ -99,7 +99,15 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
         ...params,
         mode,
         confirm: true,
-        dry_run: true, // UI selalu dry-run untuk LIVE; order nyata dikirim eksplisit lewat backend
+        // dry_run mengikuti status NYATA, bukan dikunci true di UI:
+        //   - PAPER_TRADING: dry_run tidak relevan bagi backend, biarkan true.
+        //   - LIVE: hanya jadi order SUNGGUHAN kalau backend TRADE_LIVE_ENABLED
+        //     benar-benar aktif (liveEnabled, dari fetchTradeConfig()) DAN user
+        //     sudah menyimpan kredensial bursanya sendiri (creds.ready) — dua
+        //     syarat yang sama persis dengan yang ditampilkan di teks
+        //     peringatan modal ini. Kalau salah satu belum terpenuhi, tetap
+        //     dry-run supaya tidak ada order nyata terkirim diam-diam.
+        dry_run: mode === "LIVE" ? !(liveEnabled && creds.ready) : true,
         exchange_id: ws.exchange,
         market_type: ws.environment,
       });
@@ -311,11 +319,22 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
                   </p>
                   {confirmMode === "LIVE" && (
                     <>
-                      <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2">
-                        Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
-                        Dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi CCXT tanpa order nyata).
-                        Order sungguhan hanya jika backend TRADE_LIVE_ENABLED=true.
-                      </p>
+                      {liveEnabled && creds.ready ? (
+                        // Live BENAR-BENAR aktif + kredensial ada -> order sungguhan.
+                        // Ini bukan lagi validasi CCXT kosong; klik konfirmasi di
+                        // bawah mengirim order asli ke akun bursa Anda.
+                        <p className="text-xs text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg p-2 font-medium">
+                          ⚠ Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
+                          Ini adalah <strong>ORDER SUNGGUHAN</strong> — akan langsung dikirim ke akun
+                          bursa Anda memakai dana asli. Tidak ada simulasi di langkah ini.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2">
+                          Rute: <strong>{exLabel}</strong> · {ws.environment === "futures" ? "Perpetual Futures" : "Spot"}.
+                          Dikirim sebagai <strong>dry-run</strong> dari UI ini (validasi CCXT tanpa order nyata),
+                          karena {!liveEnabled ? "backend TRADE_LIVE_ENABLED masih false" : "kredensial bursa Anda belum lengkap"}.
+                        </p>
+                      )}
                       <p className="text-xs text-slate-500 dark:text-zinc-500 flex items-start gap-1.5">
                         <ShieldCheck className="w-3.5 h-3.5 mt-px shrink-0 text-emerald-500" />
                         {creds.ready ? (
@@ -362,10 +381,16 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
                   "flex-1 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50",
                   confirmMode === "PAPER_TRADING"
                     ? "bg-emerald-600 hover:bg-emerald-500"
+                    : liveEnabled && creds.ready
+                    ? "bg-rose-600 hover:bg-rose-500"
                     : "bg-amber-600 hover:bg-amber-500",
                 )}
               >
-                {executing ? "Mengirim…" : "Konfirmasi & Kirim"}
+                {executing
+                  ? "Mengirim…"
+                  : confirmMode === "LIVE" && liveEnabled && creds.ready
+                  ? "Konfirmasi & Kirim Order Sungguhan"
+                  : "Konfirmasi & Kirim"}
               </button>
             </div>
           </div>

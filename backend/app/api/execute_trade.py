@@ -296,11 +296,25 @@ def sl_tp_capability(exchange: Any) -> str:
 
     Dibaca dari flag kapabilitas CCXT, bukan daftar hardcoded, supaya ikut
     terbarui saat CCXT menambah dukungan.
+
+    SENGAJA hanya `createStopLossOrder` — BUKAN `createStopOrder` — yang
+    dicek untuk "separate". `place_order()` di bawah memanggil method unified
+    `create_stop_loss_order()`, dan implementasi CCXT method itu SENDIRI
+    memeriksa flag `createStopLossOrder` sebelum jalan (lihat ccxt/mexc.py):
+    kalau falsy, ia me-raise NotSupported apa pun isi `createStopOrder`.
+    MEXC persis kasus ini: `createStopOrder=True` tapi `createStopLossOrder`
+    None. Memakai `createStopOrder` di sini dulu membuat kita berpikir MEXC
+    ada di jalur "separate", padahal create_stop_loss_order() akan SELALU
+    gagal di sana — entry sudah terisi baru exception muncul, lalu jalur
+    darurat unwind menutup posisi lagi. Akibatnya tiap live trade di MEXC
+    diam-diam buka-lalu-tutup posisi dan membakar fee dua kali. Dengan
+    perbaikan ini, MEXC (dan bursa lain dengan pola sama) dikembalikan
+    sebagai "none" -> place_order() menolak SEBELUM entry terkirim.
     """
     has = getattr(exchange, "has", {}) or {}
     if has.get("createOrderWithTakeProfitAndStopLoss"):
         return "atomic"
-    if has.get("createStopLossOrder") or has.get("createStopOrder"):
+    if has.get("createStopLossOrder"):
         return "separate"
     return "none"
 
