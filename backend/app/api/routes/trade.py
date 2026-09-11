@@ -55,6 +55,12 @@ class ExecuteRequest(ProposeRequest):
     dry_run: bool = True                       # hanya relevan untuk LIVE
     exchange_id: str | None = None             # binance|okx|bybit|mexc|indodax
     market_type: Literal["spot", "futures"] | None = None
+    # Persetujuan EKSPLISIT per-trade (checkbox UI) untuk membuka posisi LIVE
+    # di bursa tanpa conditional order (mis. MEXC): tanpa ini, place_order()
+    # menolak dengan UnprotectedExitRequired SEBELUM entry terkirim. Kalau
+    # true, proteksi exit sepenuhnya jadi tanggung jawab watchdog frontend +
+    # POST /trade/close — bukan bursa.
+    allow_unprotected_exit: bool = False
 
     # --- Kredensial bursa milik USER (SaaS publik / non-custodial) --------- #
     # Dikirim browser user dari Settings → Workspace Configuration. Server TIDAK
@@ -69,6 +75,15 @@ class CloseRequest(BaseModel):
     account_id: str = "default"
     trade_id: str
     exit_price: float | None = None
+    # Kredensial bursa milik USER — HANYA dipakai kalau trade yang ditutup
+    # adalah LIVE (bukan PAPER_TRADING). Tanpa ini, close pada trade LIVE
+    # ditolak (422): tidak ada jalur diam-diam pakai kunci .env server untuk
+    # mutasi akun bursa nyata.
+    exchange_id: str | None = None
+    market_type: Literal["spot", "futures"] | None = None
+    api_key: str | None = Field(default=None, repr=False)
+    secret_key: str | None = Field(default=None, repr=False)
+    passphrase: str | None = Field(default=None, repr=False)
 
 
 class ExchangeAccountRequest(BaseModel):
@@ -155,6 +170,26 @@ async def _build(request: Request, body: ProposeRequest) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
+def _native_stop_loss_support(exchange_id: str) -> bool:
+    """
+    Apakah bursa ini punya conditional order untuk dititipi SL native?
+
+    Dipakai frontend untuk menampilkan checkbox persetujuan "unprotected
+    exit" SEBELUM user mencoba eksekusi — bukan sesudah dapat 422. Dibangun
+    tanpa kredensial (`.has` adalah properti statis kelas CCXT, bukan hasil
+    panggilan API), jadi aman & murah dipanggil di endpoint config publik ini.
+    """
+    import ccxt  # type: ignore
+
+    from app.api.execute_trade import sl_tp_capability
+
+    try:
+        exchange_class = getattr(ccxt, exchange_id)
+    except AttributeError:
+        return False
+    return sl_tp_capability(exchange_class()) != "none"
+
+
 @router.get("/config")
 async def trade_config() -> dict[str, Any]:
     from app.api.execute_trade import EXCHANGE_LABELS
@@ -171,7 +206,15 @@ async def trade_config() -> dict[str, Any]:
         "default_exchange_id": settings.default_exchange_id,
         "default_market_type": settings.default_market_type,
         "supported_exchanges": [
-            {"id": k, "label": v} for k, v in EXCHANGE_LABELS.items()
+            {
+                "id": k,
+                "label": v,
+                # false -> bursa tidak punya conditional order (mis. MEXC).
+                # UI harus menyodorkan persetujuan "unprotected exit" +
+                # watchdog frontend sebelum mengizinkan LIVE di sini.
+                "native_stop_loss": _native_stop_loss_support(k),
+            }
+            for k, v in EXCHANGE_LABELS.items()
         ],
     }
 
@@ -253,6 +296,8 @@ async def trade_execute(body: ExecuteRequest, request: Request) -> dict[str, Any
         except MissingCredentials as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
 
+    from app.api.execute_trade import UnprotectedExitRequired
+
     try:
         trade = await engine.execute_live(
             proposal,
@@ -261,11 +306,24 @@ async def trade_execute(body: ExecuteRequest, request: Request) -> dict[str, Any
             market_type=market_type,
             credentials=creds,
             dry_run=body.dry_run,
+            allow_unprotected_exit=body.allow_unprotected_exit,
         )
     except LiveTradingDisabled as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
     except MissingCredentials as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    except UnprotectedExitRequired as exc:
+        # Payload terstruktur (bukan string bebas) supaya frontend bisa
+        # mengenali kasus ini secara pasti dan menyodorkan checkbox
+        # persetujuan "unprotected exit" — bukan menampilkan error generik.
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "unprotected_exit_required",
+                "message": str(exc),
+                "exchange_id": exchange_id,
+            },
+        )
     except TradeError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     except Exception as exc:  # error dari bursa
@@ -515,6 +573,14 @@ async def trade_edit_sl(body: EditStopLossRequest) -> dict[str, Any]:
 
 @router.post("/close")
 async def trade_close(body: CloseRequest, request: Request) -> dict[str, Any]:
+    """
+    Tutup posisi. PAPER_TRADING: bookkeeping saja (tidak menyentuh bursa).
+    LIVE: mengirim market order SUNGGUHAN via close_live() dulu — exit_price
+    yang dipakai adalah harga fill NYATA dari bursa, bukan harga yang
+    disodorkan klien. Inilah jalan keluar untuk posisi LIVE yang proteksinya
+    "client_side_only" (bursa tanpa conditional order, dipicu watchdog
+    frontend saat SL/TP tersentuh), dan juga penutupan manual biasa.
+    """
     store = _store(request)
     engine = _engine(request)
     trade = await asyncio.to_thread(store.get_trade, body.account_id, body.trade_id)
@@ -523,16 +589,66 @@ async def trade_close(body: CloseRequest, request: Request) -> dict[str, Any]:
     if trade["status"] != "OPEN":
         raise HTTPException(status.HTTP_409_CONFLICT, f"Trade sudah {trade['status']}.")
 
-    exit_price = body.exit_price
-    price_source = "client"
-    if not exit_price or float(exit_price) <= 0:
-        exit_price = await engine.reference_price(trade["symbol"])
-        price_source = "live_market"
-        if exit_price is None:
-            # Jaring pengaman terakhir: tutup di harga masuk (PnL ~0) daripada
-            # menggagalkan aksi user. Backend sudah mencoba ticker Binance live.
-            exit_price = trade.get("filled_price") or trade["entry_price"]
-            price_source = "entry_fallback"
+    is_live = trade.get("mode") != "PAPER_TRADING"
+
+    if is_live:
+        from app.api.execute_trade import MissingCredentials, redact, resolve_credentials
+
+        if not settings.trade_live_enabled:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "LIVE trading dinonaktifkan (TRADE_LIVE_ENABLED=false). "
+                "Posisi live tidak bisa ditutup lewat sini.",
+            )
+
+        exchange_id = (trade.get("exchange_id") or body.exchange_id or "").strip().lower()
+        server_key = settings.exchange_api_key
+        server_secret = settings.exchange_api_secret
+        server_pass = settings.exchange_api_password
+        if not (server_key and server_secret) and exchange_id == "binance":
+            server_key, server_secret, server_pass = (
+                settings.binance_api_key, settings.binance_api_secret, None
+            )
+        try:
+            creds = resolve_credentials(
+                exchange_id,
+                user_key=body.api_key,
+                user_secret=body.secret_key,
+                user_passphrase=body.passphrase,
+                server_key=server_key,
+                server_secret=server_secret,
+                server_passphrase=server_pass,
+                allow_server_fallback=settings.exchange_allow_server_keys,
+            )
+        except MissingCredentials as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+        try:
+            live_result = await engine.close_live(trade, credentials=creds)
+        except LiveTradingDisabled as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
+        except TradeError as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
+        except Exception as exc:
+            detail = redact(exc, body.api_key, body.secret_key, body.passphrase)
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Penutupan posisi LIVE gagal: {type(exc).__name__}: {detail}",
+            )
+
+        exit_price = live_result["exit_price"]
+        price_source = "live_exchange_fill"
+    else:
+        exit_price = body.exit_price
+        price_source = "client"
+        if not exit_price or float(exit_price) <= 0:
+            exit_price = await engine.reference_price(trade["symbol"])
+            price_source = "live_market"
+            if exit_price is None:
+                # Jaring pengaman terakhir: tutup di harga masuk (PnL ~0)
+                # daripada menggagalkan aksi user.
+                exit_price = trade.get("filled_price") or trade["entry_price"]
+                price_source = "entry_fallback"
 
     pnl = engine.compute_pnl(trade, float(exit_price))
     closed = await asyncio.to_thread(

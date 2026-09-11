@@ -54,7 +54,22 @@ export type TradeConfig = {
   binance_testnet?: boolean;
   default_exchange_id?: string;
   default_market_type?: string;
-  supported_exchanges?: { id: string; label: string }[];
+  supported_exchanges?: {
+    id: string;
+    label: string;
+    /** false = bursa tanpa conditional order (mis. MEXC) — UI wajib minta
+     *  persetujuan eksplisit "unprotected exit" sebelum membuka posisi LIVE. */
+    native_stop_loss?: boolean;
+  }[];
+};
+
+/** Status proteksi SL/TP satu order LIVE — dikembalikan backend apa adanya. */
+export type OrderProtection = {
+  mode: "atomic" | "separate" | "none";
+  stop_loss: "attached" | "placed" | "client_side_only" | "FAILED" | null;
+  take_profit: "attached" | "placed" | "client_side_only" | "failed" | null;
+  trailing?: string | null;
+  [key: string]: unknown;
 };
 
 export type TradeRecord = {
@@ -83,7 +98,25 @@ export type TradeRecord = {
   exit_price?: number;
   created_at: string;
   closed_at?: string;
+  /** Hanya ada untuk trade LIVE — lihat OrderProtection. */
+  protection?: OrderProtection | null;
 };
+
+/**
+ * Error dari backend dengan `code` terstruktur (lihat HTTPException(detail={...})
+ * di routes/trade.py) — supaya pemanggil bisa menangani kasus spesifik (mis.
+ * "unprotected_exit_required") tanpa mem-parse teks pesan.
+ */
+export class ApiError extends Error {
+  code?: string;
+  detail?: unknown;
+  constructor(message: string, code?: string, detail?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.detail = detail;
+  }
+}
 
 async function post(path: string, body: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -93,7 +126,11 @@ async function post(path: string, body: unknown) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data?.detail || data?.message || `HTTP ${res.status}`);
+    const detail = data?.detail;
+    if (detail && typeof detail === "object") {
+      throw new ApiError(detail.message || `HTTP ${res.status}`, detail.code, detail);
+    }
+    throw new ApiError(detail || data?.message || `HTTP ${res.status}`);
   }
   return data;
 }
@@ -116,6 +153,11 @@ export async function executeTrade(
     dry_run?: boolean;
     exchange_id?: string;   // binance|okx|bybit|mexc|indodax (Workspace Config)
     market_type?: MarketType;
+    // Persetujuan EKSPLISIT per-trade: bursa tanpa conditional order (mis.
+    // MEXC) menolak entry LIVE tanpa ini (lihat TradeConfig.supported_exchanges
+    // [].native_stop_loss). Kalau true, proteksi exit jadi tanggung jawab
+    // watchdog Journal (polling harga + market-close), bukan bursa.
+    allow_unprotected_exit?: boolean;
     // Kredensial bursa milik user. Kalau tidak dikirim eksplisit, diambil
     // otomatis dari localStorage (Settings → Workspace Configuration).
     api_key?: string;
@@ -328,11 +370,26 @@ export async function fetchAccount(accountId: string) {
   return res.json();
 }
 
+/**
+ * Tutup posisi. Untuk trade LIVE, backend MENGABAIKAN `exitPrice` dan
+ * menempatkan market order sungguhan (lihat close_live() backend) — kredensial
+ * karena itu selalu disertakan dari localStorage. Untuk trade PAPER, backend
+ * tidak butuh kredensial sama sekali (bidang ini diam-diam diabaikan), jadi
+ * aman mengirim ini apa adanya tanpa pemanggil perlu tahu jenis trade dulu.
+ *
+ * Ini SATU-SATUNYA jalan menutup posisi LIVE yang proteksinya
+ * "client_side_only" (bursa tanpa conditional order) — dipanggil watchdog
+ * Journal begitu harga live menembus SL/TP, atau lewat tombol Close manual.
+ */
 export async function closeTrade(accountId: string, tradeId: string, exitPrice?: number) {
+  const creds = getExchangeCredentials();
   return post("/api/v1/trade/close", {
     account_id: accountId,
     trade_id: tradeId,
     exit_price: exitPrice ?? null,
+    api_key: creds.api_key || undefined,
+    secret_key: creds.secret_key || undefined,
+    passphrase: creds.passphrase || undefined,
   });
 }
 

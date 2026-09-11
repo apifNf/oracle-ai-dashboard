@@ -8,7 +8,7 @@
 //
 // Dibuat sebagai fungsi murni supaya bisa diuji tanpa React.
 
-import type { TradeRecord } from "@/lib/trade";
+import type { TradeRecord, OrderProtection } from "@/lib/trade";
 import type { ExchangeAccount } from "@/lib/trade";
 import type { PaperTrade } from "@/lib/paper-ledger";
 
@@ -46,6 +46,15 @@ export type LedgerRow = {
   /** hanya untuk baris posisi bursa: PnL & harga mark dari bursa itu sendiri. */
   live_unrealized_pnl?: number;
   live_mark_price?: number;
+  /**
+   * Hanya terisi untuk source === "backend" (trade LIVE yang ORACLE sendiri
+   * buka & catat). protection.stop_loss === "client_side_only" berarti bursa
+   * ini TIDAK punya conditional order (mis. MEXC) — tidak ada stop di sisi
+   * bursa sama sekali, satu-satunya proteksi adalah watchdog Journal.
+   * Kosong (undefined) untuk source === "exchange": posisi yang cuma dibaca
+   * dari snapshot bursa, ORACLE tidak tahu riwayat proteksinya.
+   */
+  protection?: OrderProtection | null;
 };
 
 const num = (v: unknown): number => {
@@ -111,6 +120,7 @@ function fromBackend(t: TradeRecord): LedgerRow {
     exit_price: t.exit_price,
     created_at: t.created_at,
     closed_at: t.closed_at,
+    protection: t.protection,
   };
 }
 
@@ -178,4 +188,45 @@ export function buildUnifiedLedger(opts: {
 
 export function ledgerFlatSymbol(s: string): string {
   return flatSymbol(s);
+}
+
+/**
+ * Sinyal keluar untuk posisi LIVE tanpa stop di sisi bursa ("client_side_only"
+ * — mis. MEXC, disetujui eksplisit user). Dipakai watchdog Journal: kalau ini
+ * mengembalikan non-null, watchdog memanggil closeTrade() untuk menutup
+ * posisi dengan market order SUNGGUHAN.
+ *
+ * SENGAJA hanya baris `source === "backend"` — itu satu-satunya baris yang
+ * proteksinya ORACLE sendiri catat saat entry. Baris `source === "exchange"`
+ * (posisi yang cuma dibaca dari snapshot bursa) tidak disentuh: kita tidak
+ * tahu riwayat proteksinya, jadi tidak boleh menganggapnya tanpa stop lalu
+ * menutupnya sendiri.
+ *
+ * Fungsi murni, tidak mengubah state apa pun — dites tanpa React.
+ */
+export function unprotectedExitSignal(
+  row: LedgerRow,
+  currentPrice: number,
+): "SL" | "TP" | null {
+  if (row.status !== "OPEN") return null;
+  if (row.source !== "backend") return null;
+  if (row.protection?.stop_loss !== "client_side_only") return null;
+  if (!(currentPrice > 0)) return null;
+
+  const isLong = row.side === "BUY";
+
+  if (row.stop_loss_price > 0) {
+    const hitSl = isLong
+      ? currentPrice <= row.stop_loss_price
+      : currentPrice >= row.stop_loss_price;
+    if (hitSl) return "SL";
+  }
+
+  const tp = row.take_profit_targets?.[0];
+  if (typeof tp === "number" && tp > 0) {
+    const hitTp = isLong ? currentPrice >= tp : currentPrice <= tp;
+    if (hitTp) return "TP";
+  }
+
+  return null;
 }

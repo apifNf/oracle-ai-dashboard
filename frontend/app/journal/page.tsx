@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { NotebookPen, Plus, ArrowUpRight, ArrowDownRight, X, FileText, Edit2, Trash2, RefreshCw, Beaker, Zap, Loader2, Wallet, Download } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
-  fetchJournal, fetchAccount, fetchLivePrices, fetchExchangeAccount, editStopLoss,
+  fetchJournal, fetchAccount, fetchLivePrices, fetchExchangeAccount, editStopLoss, closeTrade,
   type TradeRecord, type ExchangeAccount,
 } from "@/lib/trade";
 import {
@@ -13,7 +13,7 @@ import {
   PAPER_LEDGER_EVENT, type PaperTrade,
 } from "@/lib/paper-ledger";
 import { journalRowsToCsv, downloadCsv } from "@/lib/csv-export";
-import { buildUnifiedLedger, type LedgerRow } from "@/lib/ledger";
+import { buildUnifiedLedger, unprotectedExitSignal, type LedgerRow } from "@/lib/ledger";
 import { getWorkspace, credentialsStatus } from "@/lib/workspace";
 import { CloseTradeModal } from "@/components/journal/close-trade-modal";
 import { GlassModal } from "@/components/ui/glass-modal";
@@ -240,6 +240,7 @@ export default function JournalPage() {
   const liveHwm = useRef<Map<string, number>>(new Map());     // HWM per baris LIVE
   const liveSlSent = useRef<Map<string, number>>(new Map());  // SL terakhir yg dikirim
   const liveEditInFlight = useRef<Set<string>>(new Set());
+  const liveClosing = useRef<Set<string>>(new Set());          // sedang proses market-close
 
   useEffect(() => {
     if (priceTick === 0) return;
@@ -265,6 +266,42 @@ export default function JournalPage() {
 
       // --- Baris LIVE (backend / posisi bursa) ---
       if (!hasExchangeKeys) continue;
+
+      // Bursa TANPA conditional order sama sekali (mis. MEXC, disetujui
+      // eksplisit user saat eksekusi) — tidak ada apa pun di sisi bursa untuk
+      // digeser via /edit-sl. Watchdog inilah SATU-SATUNYA proteksi: begitu
+      // harga menembus SL/TP, langsung kirim market-close SUNGGUHAN. Sengaja
+      // TIDAK menerapkan trailing/BEP di jalur ini — SL tetap statis di level
+      // saat entry sampai posisi ditutup (lihat unprotectedExitSignal).
+      if (row.protection?.stop_loss === "client_side_only") {
+        const signal = unprotectedExitSignal(row, price);
+        if (signal && !liveClosing.current.has(row.id)) {
+          liveClosing.current.add(row.id);
+          closeTrade(accountId, row.id)
+            .then((res) => {
+              if (cancelled) return;
+              pushToast(
+                "success",
+                tr("journal.watchdogExit.title"),
+                tr(signal === "SL" ? "journal.watchdogExit.sl" : "journal.watchdogExit.tp")
+                  .replace("{symbol}", row.symbol)
+                  .replace("{price}", money(res?.exit_price, 4)),
+              );
+              loadEngine();
+            })
+            .catch((e) => {
+              if (cancelled) return;
+              pushToast(
+                "error",
+                tr("journal.watchdogExit.failedTitle"),
+                e instanceof Error ? e.message : String(e),
+              );
+            })
+            .finally(() => liveClosing.current.delete(row.id));
+        }
+        continue;
+      }
+
       const prevHwm = liveHwm.current.get(row.id) ?? row.entry_price;
       const res = evaluateSmartStop({ ...row, hwm_price: prevHwm }, price);
       if (!res) continue;
@@ -689,6 +726,14 @@ export default function JournalPage() {
                             {t.market_type ? " · " + t.market_type.toUpperCase() : ""}
                           </span>
                         )}
+                        {t.protection?.stop_loss === "client_side_only" && (
+                          <span
+                            title="Bursa ini tidak punya Stop Loss sisi-server — proteksi hanya watchdog Journal, selama dashboard ini terbuka."
+                            className="w-fit px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20"
+                          >
+                            {tr("journal.unprotected.badge")}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="p-3 font-mono text-slate-700 dark:text-zinc-300">{money(entryOf(t), 4)}</td>
@@ -772,14 +817,20 @@ export default function JournalPage() {
                       )}
                     </td>
                     <td className="p-3">
-                      {isOpen && t.source === "paper" && (
-                        <button
-                          onClick={() => setCloseTarget(t)}
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-rose-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors"
-                        >
-                          {tr("journal.closePosition")}
-                        </button>
-                      )}
+                      {isOpen &&
+                        (t.source === "paper" ||
+                          // Bursa tanpa stop native (mis. MEXC): tombol manual
+                          // untuk menutup lebih awal, tanpa menunggu watchdog
+                          // menyentuh SL/TP.
+                          (t.tradeType === "LIVE" &&
+                            t.protection?.stop_loss === "client_side_only")) && (
+                          <button
+                            onClick={() => setCloseTarget(t)}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:border-rose-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors"
+                          >
+                            {tr("journal.closePosition")}
+                          </button>
+                        )}
                     </td>
                   </tr>
                   );
@@ -1010,14 +1061,18 @@ export default function JournalPage() {
         </div>
       )}
 
-      {/* MODAL: KONFIRMASI TUTUP POSISI (glassmorphism) — paper = tutup di klien */}
+      {/* MODAL: KONFIRMASI TUTUP POSISI (glassmorphism).
+          paper -> tutup di klien (localStorage). LIVE tanpa stop native
+          (client_side_only) -> onLocalClose SENGAJA undefined, supaya modal
+          memanggil closeTrade() backend yang menempatkan market order
+          SUNGGUHAN via close_live(), bukan sekadar mencatat angka. */}
       <CloseTradeModal
         trade={closeTarget}
         accountId={accountId}
         onCancel={() => setCloseTarget(null)}
         onDone={handleCloseDone}
         onLocalClose={
-          closeTarget
+          closeTarget && closeTarget.source === "paper"
             ? (exit) => handlePaperClose(closeTarget, exit)
             : undefined
         }

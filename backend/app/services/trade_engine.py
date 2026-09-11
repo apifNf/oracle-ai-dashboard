@@ -350,6 +350,7 @@ class TradeEngine:
         market_type: str = "spot",
         credentials: Any = None,
         dry_run: bool = True,
+        allow_unprotected_exit: bool = False,
     ) -> dict[str, Any]:
         """
         Kirim order ke bursa milik USER.
@@ -358,11 +359,18 @@ class TradeEngine:
         user diprioritaskan atas .env server). Wajib untuk order sungguhan;
         dry_run tidak menyentuh bursa jadi boleh None. Nilai kuncinya tidak
         pernah masuk record trade, log, atau response.
+
+        `allow_unprotected_exit` diteruskan apa adanya ke place_order(): kalau
+        bursa tidak punya conditional order (mis. MEXC) dan flag ini False,
+        place_order menolak dengan UnprotectedExitRequired SEBELUM entry
+        dikirim — dibiarkan menjalar ke pemanggil TANPA diubah jadi TradeError
+        generik, supaya route bisa menampilkan alur persetujuan eksplisit.
         """
         from app.api.execute_trade import (
             EXCHANGE_LABELS,
             ExchangeAdapterError,
             MissingCredentials,
+            UnprotectedExitRequired,
             build_ccxt_exchange,
             place_order,
             redact,
@@ -454,8 +462,13 @@ class TradeEngine:
                 market_type=market_type,
                 stop_loss=proposal["stop_loss_price"],
                 take_profit=tp_targets[0] if tp_targets else None,
+                allow_unprotected_exit=allow_unprotected_exit,
             )
         except MissingCredentials:
+            raise
+        except UnprotectedExitRequired:
+            # JANGAN diredaksi jadi TradeError generik: route perlu mengenali
+            # tipe ini persis untuk menyodorkan alur persetujuan eksplisit.
             raise
         except ExchangeAdapterError as exc:
             raise TradeError(
@@ -472,6 +485,83 @@ class TradeEngine:
             # Status proteksi native: dipakai UI untuk memastikan posisi live
             # benar-benar punya stop di sisi bursa.
             "protection": result.get("protection"),
+        }
+
+    # ---------------------- tutup posisi LIVE (gated) ------------ #
+
+    async def close_live(
+        self,
+        trade: dict[str, Any],
+        *,
+        credentials: Any,
+    ) -> dict[str, Any]:
+        """
+        Tutup posisi LIVE dengan market order sungguhan.
+
+        SATU-SATUNYA jalan keluar untuk posisi yang dibuka dengan
+        protection.stop_loss == "client_side_only" (bursa tanpa conditional
+        order, mis. MEXC dengan persetujuan eksplisit user) — dipicu watchdog
+        frontend saat harga live menembus SL/TP. Juga dipakai user yang ingin
+        menutup posisi LIVE manual sebelum stop/target tersentuh.
+
+        Kredensial WAJIB milik user (diresolve di route, sama seperti
+        execute_live) dan tidak pernah disimpan/di-log. Di-gate
+        trade_live_enabled karena ini mutasi akun bursa asli.
+        """
+        from app.api.execute_trade import (
+            EXCHANGE_LABELS,
+            ExchangeAdapterError,
+            build_ccxt_exchange,
+            close_position_market,
+            redact,
+            to_ccxt_symbol,
+        )
+
+        if not settings.trade_live_enabled:
+            raise LiveTradingDisabled(
+                "LIVE trading dinonaktifkan (TRADE_LIVE_ENABLED=false). "
+                "Posisi live tidak bisa ditutup lewat jalur ini."
+            )
+
+        exchange_id = (trade.get("exchange_id") or "").strip().lower()
+        market_type = (trade.get("market_type") or "spot").strip().lower()
+        label = EXCHANGE_LABELS.get(exchange_id, exchange_id.upper() or "Exchange")
+        testnet = bool(settings.exchange_testnet or settings.binance_testnet)
+
+        def _run() -> dict[str, Any]:
+            exchange = build_ccxt_exchange(
+                exchange_id, market_type, credentials=credentials, testnet=testnet,
+            )
+            ccxt_symbol = to_ccxt_symbol(trade["symbol"], market_type)
+            return close_position_market(
+                exchange,
+                symbol=ccxt_symbol,
+                position_side=trade["side"],
+                amount=trade["position_size_coin"],
+                market_type=market_type,
+            )
+
+        try:
+            result = await asyncio.to_thread(_run)
+        except ExchangeAdapterError as exc:
+            raise TradeError(
+                redact(exc, credentials.api_key, credentials.api_secret, credentials.api_password)
+            ) from exc
+        except Exception as exc:
+            raise TradeError(
+                f"Penutupan posisi LIVE di {label} gagal: {type(exc).__name__}: "
+                + redact(exc, credentials.api_key, credentials.api_secret, credentials.api_password)
+            ) from exc
+
+        exit_price = result.get("filled_price")
+        if not exit_price:
+            raise TradeError(
+                f"{label} tidak mengembalikan harga fill untuk penutupan posisi "
+                f"{trade['symbol']}. Periksa posisi langsung di bursa."
+            )
+        return {
+            "exit_price": float(exit_price),
+            "exchange_ref": result.get("id"),
         }
 
 

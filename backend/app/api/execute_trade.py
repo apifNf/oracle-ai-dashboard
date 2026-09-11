@@ -42,11 +42,13 @@ __all__ = [
     "REQUIRES_PASSPHRASE",
     "ExchangeAdapterError",
     "MissingCredentials",
+    "UnprotectedExitRequired",
     "Credentials",
     "resolve_credentials",
     "build_ccxt_exchange",
     "to_ccxt_symbol",
     "place_order",
+    "close_position_market",
     "edit_stop_loss",
     "fetch_exchange_account",
     "futures_default_type",
@@ -86,6 +88,18 @@ class ExchangeAdapterError(RuntimeError):
 
 class MissingCredentials(ExchangeAdapterError):
     """Kunci API user tidak lengkap untuk bursa yang dipilih."""
+
+
+class UnprotectedExitRequired(ExchangeAdapterError):
+    """
+    Bursa ini tidak punya conditional order (mode "none" di sl_tp_capability).
+
+    Dipisah dari ExchangeAdapterError generik supaya route bisa mengenalinya
+    secara pasti dan menampilkan alur persetujuan eksplisit ke user — BUKAN
+    error generik yang ditelan sebagai pesan bebas. Hanya boleh dilewati kalau
+    pemanggil mengirim `allow_unprotected_exit=True` secara sadar (dari
+    checkbox persetujuan di UI, per-trade, bukan pengaturan global).
+    """
 
 
 class Credentials(NamedTuple):
@@ -348,6 +362,7 @@ def place_order(
     stop_loss: float | None = None,
     take_profit: float | None = None,
     trailing_percent: float | None = None,
+    allow_unprotected_exit: bool = False,
 ) -> dict[str, Any]:
     """
     Kirim order entry + proteksi SL/TP NATIVE ke bursa.
@@ -356,11 +371,21 @@ def place_order(
     baru bereaksi setelah polling berikutnya dan hanya hidup selama proses kita
     hidup. Stop yang dititipkan ke matching engine bursa dieksekusi di sana,
     dalam milidetik, dan tetap berlaku walau ORACLE mati total. Untuk uang
-    sungguhan, hanya yang kedua yang layak.
+    sungguhan, native SELALU lebih layak.
 
-    Kontrak keselamatan: kalau bursa TIDAK bisa memasang stop native, fungsi
-    ini menolak SEBELUM entry dikirim — lebih baik gagal membuka posisi
-    daripada memegang posisi live tanpa stop.
+    Kontrak keselamatan default: kalau bursa TIDAK bisa memasang stop native
+    (mis. MEXC — lihat sl_tp_capability), fungsi ini menolak SEBELUM entry
+    dikirim dengan UnprotectedExitRequired — lebih baik gagal membuka posisi
+    daripada memegang posisi live tanpa stop DIAM-DIAM.
+
+    `allow_unprotected_exit=True` melewati penolakan itu SECARA SADAR: dipakai
+    saat user sudah menyetujui secara eksplisit (checkbox per-trade di UI,
+    bukan pengaturan global) bahwa proteksi exit akan dijaga watchdog frontend
+    (polling harga + market-close via /trade/close) selama dashboard-nya
+    terbuka — bukan oleh bursa. Order entry tetap terkirim; SL/TP TIDAK
+    dititipkan ke bursa sama sekali (mode "none" tidak punya conditional
+    order untuk dititipi), jadi hasilnya ditandai protection.stop_loss =
+    "client_side_only" supaya seluruh sistem tahu posisi ini butuh watchdog.
     """
     is_futures = (market_type or "spot").lower() in (
         "futures", "swap", "perpetual", "future"
@@ -368,12 +393,19 @@ def place_order(
     mode = sl_tp_capability(exchange)
     ex_name = getattr(exchange, "id", "exchange")
 
-    # --- Pre-flight: jangan pernah membuka posisi yang tak bisa dilindungi ---
-    if stop_loss and mode == "none":
-        raise ExchangeAdapterError(
+    # --- Pre-flight: jangan pernah membuka posisi tak terlindungi DIAM-DIAM --
+    if stop_loss and mode == "none" and not allow_unprotected_exit:
+        raise UnprotectedExitRequired(
             f"{ex_name.upper()} tidak mendukung conditional order, jadi Stop Loss "
-            "tidak bisa dititipkan ke bursa. ORACLE menolak membuka posisi LIVE "
-            "tanpa proteksi stop native."
+            "tidak bisa dititipkan ke bursa. Perlu persetujuan eksplisit untuk "
+            "membuka posisi LIVE tanpa stop native — proteksi akan sepenuhnya "
+            "bergantung pada watchdog dashboard (dashboard harus tetap terbuka)."
+        )
+    if stop_loss and mode == "none" and allow_unprotected_exit:
+        logger.warning(
+            "%s: entry LIVE TANPA stop native — disetujui eksplisit user. "
+            "Proteksi bergantung sepenuhnya pada watchdog frontend.",
+            ex_name.upper(),
         )
 
     if is_futures and leverage:
@@ -411,6 +443,15 @@ def place_order(
     if not stop_loss:
         return _order_result(order, protection)
 
+    # --- mode "none" DENGAN persetujuan: tidak ada conditional order untuk
+    # dititipi sama sekali — jangan panggil create_stop_loss_order() (pasti
+    # NotSupported di bursa begini) apalagi jalur unwind darurat di bawah.
+    # Proteksi murni jadi tanggung jawab watchdog frontend + /trade/close.
+    if mode == "none":
+        protection["stop_loss"] = "client_side_only"
+        protection["take_profit"] = "client_side_only" if take_profit else None
+        return _order_result(order, protection)
+
     # --- Jalur SEPARATE: conditional order reduce-only setelah entry ------- #
     # Sisi berlawanan: posisi BUY ditutup dengan SELL, dan sebaliknya.
     exit_side = "sell" if oside == "buy" else "buy"
@@ -432,9 +473,9 @@ def place_order(
         protection["stop_loss"] = "FAILED"
         protection["stop_loss_error"] = type(exc).__name__
         try:
-            exchange.create_order(
-                symbol=symbol, type="market", side=exit_side, amount=amount,
-                price=None, params=dict(reduce_params),
+            close_position_market(
+                exchange, symbol=symbol, position_side=side,
+                amount=amount, market_type=market_type,
             )
             protection["unwound"] = True
             raise ExchangeAdapterError(
@@ -477,6 +518,44 @@ def _order_result(order: dict[str, Any], protection: dict[str, Any]) -> dict[str
         "status": order.get("status"),
         "protection": protection,
         "raw": {k: order.get(k) for k in ("id", "symbol", "type", "side", "amount", "status")},
+    }
+
+
+def close_position_market(
+    exchange: Any,
+    *,
+    symbol: str,
+    position_side: str,
+    amount: float,
+    market_type: str,
+) -> dict[str, Any]:
+    """
+    Tutup posisi dengan SATU market order reduce-only di sisi berlawanan dari
+    posisi. `position_side` = sisi POSISI ("BUY"/"SELL"), bukan sisi order ini.
+
+    Dipakai di dua tempat:
+      1. Unwind darurat di place_order() saat Stop Loss gagal dipasang setelah
+         entry terisi.
+      2. Endpoint /trade/close untuk menutup posisi LIVE yang proteksinya
+         "client_side_only" (bursa tanpa conditional order, mis. MEXC) — di
+         situ inilah SATU-SATUNYA jalan keluar, dipicu watchdog frontend saat
+         harga live menembus SL/TP. Tanpa panggilan real ini, "watchdog"
+         hanya akan menampilkan peringatan tanpa benar-benar menutup posisi.
+    """
+    is_futures = (market_type or "spot").lower() in (
+        "futures", "swap", "perpetual", "future"
+    )
+    exit_side = "sell" if str(position_side).upper() == "BUY" else "buy"
+    reduce_params = {"reduceOnly": True} if is_futures else {}
+
+    order = exchange.create_order(
+        symbol=symbol, type="market", side=exit_side, amount=amount,
+        price=None, params=dict(reduce_params),
+    )
+    return {
+        "id": order.get("id"),
+        "filled_price": order.get("average") or order.get("price"),
+        "status": order.get("status"),
     }
 
 

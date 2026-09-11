@@ -11,7 +11,7 @@ import { DetailChart } from "@/components/charts/detail-chart";
 import { OrderBook } from "@/components/trade/order-book";
 import {
   type ProposalParams, type TradeProposal, type TradeConfig, type TradeMode,
-  fetchProposal, fetchTradeConfig, executeTrade,
+  fetchProposal, fetchTradeConfig, executeTrade, ApiError,
 } from "@/lib/trade";
 import {
   useWorkspace, exchangeLabel, credentialsStatus, WORKSPACE_EVENT,
@@ -55,6 +55,12 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
   const [result, setResult] = useState<any>(null);
   const [execError, setExecError] = useState<string | null>(null);
 
+  // Persetujuan eksplisit "unprotected exit" — WAJIB dicentang sebelum posisi
+  // LIVE di bursa tanpa conditional order (mis. MEXC, native_stop_loss=false)
+  // bisa dikirim. Direset tiap kali modal konfirmasi dibuka ulang supaya user
+  // tidak bisa "mewarisi" centang dari trade sebelumnya.
+  const [unprotectedAck, setUnprotectedAck] = useState(false);
+
   // Kelengkapan kunci bursa user (SaaS publik / non-custodial). Dibaca dari
   // localStorage dan ikut berubah begitu Settings di-save — user tidak perlu
   // reload untuk melihat tombol Auto-Trade aktif.
@@ -62,6 +68,12 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
     ready: false,
     missing: [],
   });
+  // Centang consent tidak boleh "mewarisi" — reset tiap kali modal konfirmasi
+  // dibuka ulang (baik trade baru maupun dibuka-tutup-buka lagi yang sama).
+  useEffect(() => {
+    if (confirmMode) setUnprotectedAck(false);
+  }, [confirmMode]);
+
   useEffect(() => {
     const sync = () => setCreds(credentialsStatus(ws.exchange));
     sync();
@@ -110,11 +122,24 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
         dry_run: mode === "LIVE" ? !(liveEnabled && creds.ready) : true,
         exchange_id: ws.exchange,
         market_type: ws.environment,
+        // Bursa tanpa conditional order (mis. MEXC) menolak entry LIVE tanpa
+        // ini — lihat UnprotectedExitRequired di backend. Hanya dikirim true
+        // kalau benar-benar dibutuhkan DAN user sudah mencentang peringatannya
+        // di modal (needsUnprotectedConsent / unprotectedAck di bawah).
+        allow_unprotected_exit: mode === "LIVE" ? needsUnprotectedConsent && unprotectedAck : undefined,
       });
       setResult({ ...res, _mode: mode });
       onExecuted?.(res);
     } catch (e) {
-      setExecError(e instanceof Error ? e.message : "Eksekusi gagal");
+      if (e instanceof ApiError && e.code === "unprotected_exit_required") {
+        // Race jarang: checkbox belum sempat tercentang / state basi. Kasih
+        // tahu spesifik alih-alih pesan generik "Eksekusi gagal".
+        setExecError(
+          `${exLabel} tidak punya Stop Loss di sisi bursa — centang dulu peringatan "tanpa stop bursa" di atas sebelum mengonfirmasi.`,
+        );
+      } else {
+        setExecError(e instanceof Error ? e.message : "Eksekusi gagal");
+      }
     } finally {
       setExecuting(false);
       setConfirmMode(null);
@@ -171,6 +196,15 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
   }
 
   const liveEnabled = Boolean(config?.live_enabled);
+
+  // Bursa terpilih tidak punya conditional order sama sekali (mis. MEXC) —
+  // lihat TradeConfig.supported_exchanges[].native_stop_loss di backend
+  // (_native_stop_loss_support(), dibaca langsung dari ccxt.<id>().has).
+  // Entry tak dikenal (belum ada di daftar) dianggap AMAN by default supaya
+  // tidak memblokir bursa baru secara keliru — hanya `=== false` eksplisit
+  // yang memicu consent flow.
+  const exchangeInfo = config?.supported_exchanges?.find((e) => e.id === ws.exchange);
+  const needsUnprotectedConsent = exchangeInfo?.native_stop_loss === false;
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#0b0b0d] overflow-hidden">
@@ -349,6 +383,23 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
                           </>
                         )}
                       </p>
+                      {needsUnprotectedConsent && liveEnabled && creds.ready && (
+                        <label className="flex items-start gap-2 text-xs text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg p-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={unprotectedAck}
+                            onChange={(e) => setUnprotectedAck(e.target.checked)}
+                            className="mt-0.5 shrink-0 accent-rose-600"
+                          />
+                          <span>
+                            <strong>{exLabel} tidak mendukung Stop Loss di sisi bursa.</strong>{" "}
+                            Saya paham proteksi sepenuhnya bergantung pada dashboard ORACLE ini
+                            tetap terbuka di browser saya — jika saya menutup tab atau koneksi
+                            terputus, posisi ini tidak memiliki stop sampai saya kembali membuka
+                            Journal.
+                          </span>
+                        </label>
+                      )}
                     </>
                   )}
                 </div>
@@ -376,7 +427,19 @@ export function TradeProposalTicket({ params, onExecuted }: Props) {
               </button>
               <button
                 onClick={() => runExecute(confirmMode)}
-                disabled={executing}
+                disabled={
+                  executing ||
+                  (confirmMode === "LIVE" &&
+                    needsUnprotectedConsent &&
+                    liveEnabled &&
+                    creds.ready &&
+                    !unprotectedAck)
+                }
+                title={
+                  confirmMode === "LIVE" && needsUnprotectedConsent && liveEnabled && creds.ready && !unprotectedAck
+                    ? "Centang dulu persetujuan tanpa stop bursa di atas"
+                    : undefined
+                }
                 className={cn(
                   "flex-1 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors disabled:opacity-50",
                   confirmMode === "PAPER_TRADING"
