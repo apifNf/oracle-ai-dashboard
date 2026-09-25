@@ -30,6 +30,11 @@ export default function DashboardPage() {
   const [response, setResponse] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [tickers, setTickers] = useState(initialTickers);
+  // "loading" tetap ditampilkan sampai fetch PERTAMA sukses. Sebelumnya, kalau
+  // fetch gagal terus (mis. domain Binance diblokir jaringan/operator seluler
+  // tertentu), ticker diam-diam macet selamanya di 15 baris "Loading..." tanpa
+  // indikasi apa pun ke user — sekarang status kegagalan eksplisit ditampilkan.
+  const [tickerStatus, setTickerStatus] = useState<"loading" | "ready" | "error">("loading");
   const [activeSignals, setActiveSignals] = useState<number | string>("Scanning...");
   const isScanning = activeSignals === "Scanning...";
   const [ledger, setLedger] = useState<{ count: number; balance: number } | null>(null);
@@ -42,7 +47,9 @@ export default function DashboardPage() {
         const apiUrl = `https://data-api.binance.vision/api/v3/ticker/24hr?symbols=[${symbolsArray}]`;
         
         const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        if (!Array.isArray(data)) throw new Error("Bentuk respons tidak dikenali");
 
         const liveData = data.map((item: any) => {
             const symbol = item.symbol.replace("USDT", "");
@@ -68,9 +75,14 @@ export default function DashboardPage() {
 
         if (liveData.length > 0) {
           setTickers(liveData);
+          setTickerStatus("ready");
         }
       } catch (error) {
         console.error("Gagal menarik data market dari jalur VIP:", error);
+        // Jangan biarkan macet diam-diam di "Loading..." — kalau belum pernah
+        // sukses sama sekali, tandai error supaya UI menampilkan status jelas
+        // alih-alih 15 baris placeholder beku selamanya.
+        setTickerStatus((prev) => (prev === "ready" ? prev : "error"));
       }
     };
 
@@ -175,11 +187,14 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 dark:bg-[#09090b] text-slate-900 dark:text-zinc-100 overflow-x-hidden transition-colors duration-300">
       
-      {/* LIVE MARKET TICKER */}
-      <div className="w-full bg-white dark:bg-[#111113] border-b border-slate-200 dark:border-zinc-800/50 flex items-center overflow-hidden h-12 relative transition-colors duration-300">
-        <div className="absolute left-0 z-10 w-24 h-full bg-gradient-to-r from-white dark:from-[#111113] to-transparent pointer-events-none transition-colors duration-300"></div>
-        <div className="absolute right-0 z-10 w-24 h-full bg-gradient-to-l from-white dark:from-[#111113] to-transparent pointer-events-none transition-colors duration-300"></div>
-        
+      {/* LIVE MARKET TICKER — -mx-3 md:mx-0: AppShell membungkus tiap halaman
+          dengan px-3 di mobile (lihat components/layout/app-shell.tsx); tanpa
+          ini ticker selalu punya jarak dari tepi layar dan tidak pernah
+          benar-benar edge-to-edge di mobile seperti pada Binance/MEXC. */}
+      <div className="w-full -mx-3 md:mx-0 bg-white dark:bg-[#111113] border-b border-slate-200 dark:border-zinc-800/50 flex items-center overflow-x-auto scrollbar-hide h-11 md:h-12 relative transition-colors duration-300">
+        <div className="absolute left-0 z-10 w-12 md:w-24 h-full bg-gradient-to-r from-white dark:from-[#111113] to-transparent pointer-events-none transition-colors duration-300"></div>
+        <div className="absolute right-0 z-10 w-12 md:w-24 h-full bg-gradient-to-l from-white dark:from-[#111113] to-transparent pointer-events-none transition-colors duration-300"></div>
+
         <style jsx>{`
           @keyframes ticker {
             0% { transform: translateX(0); }
@@ -193,45 +208,70 @@ export default function DashboardPage() {
           .animate-ticker:hover {
             animation-play-state: paused;
           }
+          /* Marquee tetap auto-scroll; scrollbar disembunyikan tapi swipe manual
+             (mobile) tetap jalan lewat overflow-x-auto di container-nya. */
+          .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+          }
+          .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+          }
         `}</style>
-        
-        <div className="animate-ticker">
-          {[...tickers, ...tickers].map((coin, idx) => (
-            <div key={idx} className="flex items-center gap-3 px-8 border-r border-slate-200 dark:border-zinc-800/50 whitespace-nowrap cursor-default transition-colors duration-300">
-              
-              <div className="w-5 h-5 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
-                <img 
-                  src={coin.logo} 
-                  alt={coin.symbol} 
-                  className="w-full h-full object-cover"
-                  onError={(e) => { e.currentTarget.src = "https://cryptologos.cc/logos/bitcoin-btc-logo.svg"; }}
-                />
-              </div>
 
-              <span className="text-[13px] font-medium font-mono text-slate-500 dark:text-zinc-400">{coin.pair}</span>
-              <span className="text-[14px] text-slate-900 dark:text-white font-bold dark:font-semibold tracking-tight">{coin.price}</span>
-              <span className={`text-[13px] font-bold ${coin.isUp ? "text-emerald-600 dark:text-emerald-500" : "text-red-600 dark:text-red-500"}`}>
-                {coin.change}
-              </span>
-            </div>
-          ))}
-        </div>
+        {tickerStatus === "ready" ? (
+          <div className="animate-ticker">
+            {[...tickers, ...tickers].map((coin, idx) => (
+              <div key={idx} className="flex items-center gap-2 md:gap-3 px-4 md:px-8 border-r border-slate-200 dark:border-zinc-800/50 whitespace-nowrap cursor-default transition-colors duration-300">
+
+                <div className="w-4 h-4 md:w-5 md:h-5 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
+                  <img
+                    src={coin.logo}
+                    alt={coin.symbol}
+                    className="w-full h-full object-cover"
+                    onError={(e) => { e.currentTarget.src = "https://cryptologos.cc/logos/bitcoin-btc-logo.svg"; }}
+                  />
+                </div>
+
+                <span className="text-[11px] md:text-[13px] font-medium font-mono text-slate-500 dark:text-zinc-400">{coin.pair}</span>
+                <span className="text-xs md:text-[14px] text-slate-900 dark:text-white font-bold dark:font-semibold tracking-tight">{coin.price}</span>
+                <span className={`text-[11px] md:text-[13px] font-bold ${coin.isUp ? "text-emerald-600 dark:text-emerald-500" : "text-red-600 dark:text-red-500"}`}>
+                  {coin.change}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          // Jujur soal statusnya — daripada 15 baris "Loading..." beku
+          // selamanya kalau jalur data (Binance Vision, langsung dari klien)
+          // gagal terus (mis. diblokir jaringan/operator seluler tertentu).
+          <div className="flex items-center gap-2 px-4 w-full justify-center text-xs text-slate-400 dark:text-zinc-500">
+            <Radar className={`w-3.5 h-3.5 ${tickerStatus === "loading" ? "animate-spin-slow" : ""}`} />
+            <span>
+              {tickerStatus === "loading"
+                ? t("dashboard.ticker.connecting")
+                : t("dashboard.ticker.unavailable")}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* MAIN DASHBOARD CONTENT */}
-      <div className="p-4 sm:p-6 md:p-10 max-w-7xl mx-auto w-full space-y-6 md:space-y-8">
+      {/* MAIN DASHBOARD CONTENT — px-0 di mobile: AppShell sudah kasih px-3,
+          menumpuk padding di sini bikin konten "termakan" ke tengah (kesan
+          desktop yang di-squish). Sisakan hanya jarak vertikal. */}
+      <div className="px-0 py-3 sm:p-4 md:p-10 max-w-7xl mx-auto w-full space-y-4 md:space-y-8">
 
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] font-bold text-emerald-600 dark:text-emerald-500 mb-2 flex items-center gap-2">
-            <Activity className="w-4 h-4 animate-pulse" /> {t("dashboard.eyebrow")}
+          <p className="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] font-bold text-emerald-600 dark:text-emerald-500 mb-1.5 md:mb-2 flex items-center gap-1.5 md:gap-2">
+            <Activity className="w-3.5 h-3.5 md:w-4 md:h-4 animate-pulse" /> {t("dashboard.eyebrow")}
           </p>
-          <h1 className="text-2xl md:text-3xl font-semibold text-slate-900 dark:text-white transition-colors duration-300">
+          <h1 className="text-xl md:text-4xl font-semibold text-slate-900 dark:text-white transition-colors duration-300">
             {t("dashboard.title")}
           </h1>
         </div>
 
         {/* INTERACTIVE PREMIUM CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-5">
           <StatCard 
             title={t("dashboard.card.macro.title")}
             value={t("dashboard.card.macro.value")}
@@ -290,16 +330,16 @@ export default function DashboardPage() {
         </div>
 
         {/* QUICK AI TERMINAL */}
-        <div className="mt-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] overflow-hidden shadow-xl dark:shadow-2xl relative group transition-colors duration-300">
+        <div className="mt-2 md:mt-4 rounded-xl md:rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] overflow-hidden shadow-xl dark:shadow-2xl relative group transition-colors duration-300">
           <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
 
-          <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 transition-colors duration-300">
-            <h2 className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-zinc-300">
-              <Terminal className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /> {t("dashboard.quickAsk.title")}
+          <div className="flex items-center justify-between px-3 py-2.5 md:px-6 md:py-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 transition-colors duration-300">
+            <h2 className="text-xs md:text-sm font-semibold flex items-center gap-1.5 md:gap-2 text-slate-700 dark:text-zinc-300">
+              <Terminal className="w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-600 dark:text-emerald-500" /> {t("dashboard.quickAsk.title")}
             </h2>
           </div>
 
-          <div className="p-4 md:p-6">
+          <div className="p-3 md:p-6">
             <form onSubmit={handleAskOracle} className="relative flex items-center bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl shadow-inner focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/50 transition-all">
               <input
                 type="text"
@@ -343,24 +383,24 @@ export default function DashboardPage() {
 
 function StatCard({ title, value, subtitle, icon, glowColor, href, loading = false }: { title: string, value: string, subtitle: string, icon: any, glowColor: string, href: string, loading?: boolean }) {
   return (
-    <Link href={href} className={`group block p-4 md:p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] hover:bg-slate-50 dark:hover:bg-[#151518] hover:-translate-y-1 transition-all duration-300 relative overflow-hidden cursor-pointer shadow-sm dark:shadow-none ${glowColor}`}>
+    <Link href={href} className={`group block p-3 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] hover:bg-slate-50 dark:hover:bg-[#151518] hover:-translate-y-1 transition-all duration-300 relative overflow-hidden cursor-pointer shadow-sm dark:shadow-none ${glowColor}`}>
 
-      <div className="flex justify-between items-start mb-4 md:mb-6 relative z-10">
-        <div className="flex items-center gap-2.5 md:gap-3">
-          <div className="p-2 md:p-2.5 bg-slate-50 dark:bg-zinc-900 rounded-xl border border-slate-100 dark:border-zinc-800 group-hover:bg-slate-100 dark:group-hover:bg-zinc-800/80 transition-colors shadow-inner dark:shadow-none">
+      <div className="flex justify-between items-start mb-2.5 md:mb-6 relative z-10">
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className="p-1.5 md:p-2.5 bg-slate-50 dark:bg-zinc-900 rounded-lg md:rounded-xl border border-slate-100 dark:border-zinc-800 group-hover:bg-slate-100 dark:group-hover:bg-zinc-800/80 transition-colors shadow-inner dark:shadow-none">
             {icon}
           </div>
           <p className="text-xs md:text-sm font-semibold tracking-wide text-slate-500 dark:text-zinc-400 group-hover:text-slate-700 dark:group-hover:text-zinc-200 transition-colors">{title}</p>
         </div>
 
-        <ArrowUpRight className="w-5 h-5 text-slate-400 dark:text-zinc-500 opacity-0 group-hover:opacity-100 transform translate-x-2 translate-y-2 group-hover:translate-x-0 group-hover:translate-y-0 transition-all duration-300" />
+        <ArrowUpRight className="hidden md:block w-5 h-5 text-slate-400 dark:text-zinc-500 opacity-0 group-hover:opacity-100 transform translate-x-2 translate-y-2 group-hover:translate-x-0 group-hover:translate-y-0 transition-all duration-300" />
       </div>
 
       <div className="relative z-10">
-        <h3 className={`text-xl md:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-colors duration-300 ${loading ? "text-lg md:text-xl animate-pulse" : ""}`}>
+        <h3 className={`text-lg md:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-colors duration-300 ${loading ? "text-base md:text-xl animate-pulse" : ""}`}>
           {value}
         </h3>
-        <p className="text-xs md:text-[13px] text-slate-500 dark:text-zinc-500 mt-1.5 md:mt-2 font-medium transition-colors duration-300">{subtitle}</p>
+        <p className="text-[11px] md:text-[13px] text-slate-500 dark:text-zinc-500 mt-1 md:mt-2 font-medium transition-colors duration-300">{subtitle}</p>
       </div>
 
       <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-slate-200/50 dark:bg-white/5 rounded-full blur-3xl group-hover:bg-slate-300/50 dark:group-hover:bg-white/10 transition-colors duration-500 pointer-events-none"></div>

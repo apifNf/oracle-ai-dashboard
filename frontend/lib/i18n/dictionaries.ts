@@ -50,6 +50,8 @@ export const en = {
   "dashboard.eyebrow": "COMMAND CENTER",
   "dashboard.title": "Market Overview",
   "dashboard.scanning": "Scanning...",
+  "dashboard.ticker.connecting": "Connecting to live price feed…",
+  "dashboard.ticker.unavailable": "Live prices unavailable — retrying…",
   "dashboard.card.macro.title": "Macro Regime",
   "dashboard.card.macro.value": "Neutral",
   "dashboard.card.macro.sub": "Live liquidity & volatility index",
@@ -90,6 +92,11 @@ export const en = {
   "scanner.streamDown.title": "Exchange price feed disconnected",
   "scanner.streamDown.body":
     "The server is reconnecting ({attempts} attempts). The numbers below are the last data received, not current prices.",
+  "scanner.diag.title": "Still can't reach the scanner engine",
+  "scanner.diag.mixedContent":
+    "This page loaded over HTTPS, but the scanner backend is only served over plain WS/HTTP — browsers block that connection outright (mixed content). Point NEXT_PUBLIC_API_BASE_URL at an HTTPS backend, or serve it behind TLS.",
+  "scanner.diag.generic":
+    "The WebSocket keeps failing to open. Check that the backend below is reachable from this device and that its CORS origin allowlist includes this site.",
   "scanner.empty.title": "No scanner data",
   "scanner.empty.connected": "Server connected but has not sent any assets yet.",
   "scanner.empty.disconnected": "Connection to the server was lost.",
@@ -400,6 +407,8 @@ export const id: Record<TranslationKey, string> = {
   "dashboard.eyebrow": "PUSAT KENDALI",
   "dashboard.title": "Ikhtisar Pasar",
   "dashboard.scanning": "Memindai...",
+  "dashboard.ticker.connecting": "Menghubungkan ke live price feed…",
+  "dashboard.ticker.unavailable": "Harga live tidak tersedia — mencoba lagi…",
   "dashboard.card.macro.title": "Rezim Makro",
   "dashboard.card.macro.value": "Netral",
   "dashboard.card.macro.sub": "Indeks likuiditas & volatilitas langsung",
@@ -440,6 +449,11 @@ export const id: Record<TranslationKey, string> = {
   "scanner.streamDown.title": "Aliran harga bursa terputus",
   "scanner.streamDown.body":
     "Server sedang menyambung ulang ({attempts} percobaan). Angka di bawah adalah data terakhir yang diterima, bukan harga saat ini.",
+  "scanner.diag.title": "Masih belum bisa menjangkau mesin scanner",
+  "scanner.diag.mixedContent":
+    "Halaman ini dimuat lewat HTTPS, tapi backend scanner hanya dilayani lewat WS/HTTP biasa — browser langsung memblokir koneksi ini (mixed content). Arahkan NEXT_PUBLIC_API_BASE_URL ke backend HTTPS, atau layani backend di belakang TLS.",
+  "scanner.diag.generic":
+    "WebSocket terus gagal terbuka. Periksa apakah backend di bawah bisa dijangkau dari perangkat ini dan apakah allowlist CORS-nya sudah menyertakan domain situs ini.",
   "scanner.empty.title": "Tidak ada data scanner",
   "scanner.empty.connected": "Server terhubung tetapi belum mengirim aset apa pun.",
   "scanner.empty.disconnected": "Koneksi ke server terputus.",

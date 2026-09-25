@@ -134,20 +134,20 @@ const ageText = (t: Translate, seconds: number | null): string => {
 function RiskDisclaimer({ text }: { text?: string }) {
   const t = useTranslation();
   return (
-    <div className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/20 p-4 sm:p-5">
-      <div className="flex gap-3">
-        <ShieldAlert className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-500 mt-0.5" />
-        <div className="space-y-2">
-          <p className="text-sm font-semibold text-amber-900 dark:text-amber-400">
+    <div className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/20 p-3 md:p-5">
+      <div className="flex gap-2.5 md:gap-3">
+        <ShieldAlert className="w-4 h-4 md:w-5 md:h-5 shrink-0 text-amber-600 dark:text-amber-500 mt-0.5" />
+        <div className="space-y-1.5 md:space-y-2">
+          <p className="text-xs md:text-sm font-semibold text-amber-900 dark:text-amber-400">
             {t("scanner.risk.title")}
           </p>
-          <p className="text-xs leading-relaxed text-amber-800/90 dark:text-amber-300/80">
+          <p className="text-[11px] md:text-xs leading-relaxed text-amber-800/90 dark:text-amber-300/80">
             {t("scanner.risk.bodyBefore")}{" "}
             <strong>{t("scanner.risk.bodyStrong")}</strong>
             {t("scanner.risk.bodyAfter")}
           </p>
           {text && (
-            <p className="text-[11px] font-mono text-amber-700/70 dark:text-amber-400/60 pt-1 border-t border-amber-200 dark:border-amber-900/50">
+            <p className="text-[10px] md:text-[11px] font-mono text-amber-700/70 dark:text-amber-400/60 pt-1 border-t border-amber-200 dark:border-amber-900/50">
               {text}
             </p>
           )}
@@ -253,6 +253,10 @@ export default function ScannerPage() {
   const [lastMessageAt, setLastMessageAt] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Dipakai HANYA untuk diagnostik UI (banner di bawah) — retryRef sendiri
+  // (ref) tidak memicu render, jadi hitungan kegagalan berturut-turut perlu
+  // salinan di state supaya bisa ditampilkan begitu koneksi macet lama.
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -278,6 +282,7 @@ export default function ScannerPage() {
   const scheduleReconnect = useCallback(() => {
     if (closedByUs.current) return;
     retryRef.current += 1;
+    setFailedAttempts(retryRef.current);
     // Exponential backoff dengan jitter, dibatasi RECONNECT_MAX_MS.
     const ceiling = Math.min(RECONNECT_BASE_MS * 2 ** retryRef.current, RECONNECT_MAX_MS);
     const delay = ceiling / 2 + Math.random() * (ceiling / 2);
@@ -300,6 +305,7 @@ export default function ScannerPage() {
 
     socket.onopen = () => {
       retryRef.current = 0;
+      setFailedAttempts(0);
       setSocketState("connected");
     };
 
@@ -344,6 +350,7 @@ export default function ScannerPage() {
   const reconnectNow = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     retryRef.current = 0;
+    setFailedAttempts(0);
     wsRef.current?.close();
     wsRef.current = null;
     connect();
@@ -364,23 +371,34 @@ export default function ScannerPage() {
   const signals = snapshot?.signals ?? [];
   const isInitialLoading = snapshot === null && socketState !== "disconnected";
 
+  // Diagnostik jujur untuk "stuck on Connecting": kalau halaman sendiri
+  // dimuat lewat https:// tapi WS_ENDPOINT masih ws:// (backend belum di
+  // belakang TLS), browser BLOKIR koneksinya sebagai mixed content —
+  // permanen, bukan soal retry/backoff. Ini bukan bug mounting React; tidak
+  // ada perbaikan sisi klien untuk itu selain memberi tahu penyebabnya.
+  const mixedContentBlocked =
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:" &&
+    WS_ENDPOINT.startsWith("ws://");
+  const showConnectionDiagnostic = !snapshot && failedAttempts >= 3;
+
   if (!mounted) return null;
 
   /* ---------------- Render ---------------- */
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="space-y-4 md:space-y-6 pb-10">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 md:gap-4">
         <div>
-          <p className="text-sm uppercase tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400">
+          <p className="text-xs md:text-sm uppercase tracking-[0.18em] md:tracking-[0.24em] font-medium text-slate-500 dark:text-zinc-400">
             {t("scanner.eyebrow")}
           </p>
-          <h1 className="mt-2 text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50">
-            <Activity className="w-8 h-8 text-emerald-500" /> {t("scanner.title")}
+          <h1 className="mt-1.5 md:mt-2 text-xl md:text-4xl font-semibold flex items-center gap-2 md:gap-3 text-slate-900 dark:text-zinc-50">
+            <Activity className="w-5 h-5 md:w-8 md:h-8 text-emerald-500" /> {t("scanner.title")}
           </h1>
           {snapshot && (
-            <p className="mt-1.5 text-xs text-slate-500 dark:text-zinc-500 font-mono">
+            <p className="mt-1 md:mt-1.5 text-[11px] md:text-xs text-slate-500 dark:text-zinc-500 font-mono">
               {t("scanner.assetsComplete", {
                 ok: snapshot.counts.ok,
                 total: snapshot.counts.total,
@@ -395,19 +413,19 @@ export default function ScannerPage() {
           )}
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex gap-2 md:gap-3">
           {(socketState !== "connected" || snapshotStale) && (
             <button
               onClick={reconnectNow}
-              className="flex items-center gap-2 px-4 py-2 border rounded-lg font-medium text-sm bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-[#09090b] dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 transition-colors"
+              className="flex items-center gap-1.5 md:gap-2 px-3 py-1.5 md:px-4 md:py-2 border rounded-lg font-medium text-xs md:text-sm bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-[#09090b] dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900 transition-colors"
             >
-              <RefreshCw className="w-4 h-4" /> {t("scanner.reconnect")}
+              <RefreshCw className="w-3.5 h-3.5 md:w-4 md:h-4" /> {t("scanner.reconnect")}
             </button>
           )}
 
           <div
             className={cn(
-              "flex items-center gap-2 px-4 py-2 border rounded-lg font-medium shadow-sm dark:shadow-none",
+              "flex items-center gap-1.5 md:gap-2 px-3 py-1.5 md:px-4 md:py-2 border rounded-lg font-medium shadow-sm dark:shadow-none",
               socketState === "connected" && !snapshotStale
                 ? "bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-500"
                 : socketState === "connected" && snapshotStale
@@ -416,19 +434,41 @@ export default function ScannerPage() {
             )}
           >
             {socketState === "connected" && !snapshotStale ? (
-              <><Wifi className="w-4 h-4" /><span className="text-sm">{t("scanner.status.live")}</span></>
+              <><Wifi className="w-3.5 h-3.5 md:w-4 md:h-4" /><span className="text-xs md:text-sm">{t("scanner.status.live")}</span></>
             ) : socketState === "connected" && snapshotStale ? (
-              <><Clock className="w-4 h-4" /><span className="text-sm">{t("scanner.status.delayed")}</span></>
+              <><Clock className="w-3.5 h-3.5 md:w-4 md:h-4" /><span className="text-xs md:text-sm">{t("scanner.status.delayed")}</span></>
             ) : socketState === "reconnecting" ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">{t("scanner.status.reconnecting")}</span></>
+              <><Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin" /><span className="text-xs md:text-sm">{t("scanner.status.reconnecting")}</span></>
             ) : socketState === "connecting" ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">{t("scanner.status.connecting")}</span></>
+              <><Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin" /><span className="text-xs md:text-sm">{t("scanner.status.connecting")}</span></>
             ) : (
-              <><WifiOff className="w-4 h-4" /><span className="text-sm">{t("scanner.status.disconnected")}</span></>
+              <><WifiOff className="w-3.5 h-3.5 md:w-4 md:h-4" /><span className="text-xs md:text-sm">{t("scanner.status.disconnected")}</span></>
             )}
           </div>
         </div>
       </div>
+
+      {/* Diagnostik koneksi — muncul HANYA setelah beberapa kali gagal
+          berturut-turut dan snapshot belum pernah datang sama sekali. Ini
+          bukan status "sedang mencoba" biasa (itu sudah diwakili pill di atas)
+          — ini pemberitahuan bahwa retry backoff kemungkinan tidak akan
+          pernah berhasil sendiri, plus alasan paling mungkin. */}
+      {showConnectionDiagnostic && (
+        <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/20 p-3 md:p-4 flex gap-2.5 md:gap-3">
+          <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 shrink-0 text-red-600 dark:text-red-500 mt-0.5" />
+          <div className="space-y-1 min-w-0">
+            <p className="text-xs md:text-sm font-semibold text-red-900 dark:text-red-400">
+              {t("scanner.diag.title")}
+            </p>
+            <p className="text-[11px] md:text-xs text-red-800/90 dark:text-red-300/80 leading-relaxed">
+              {mixedContentBlocked ? t("scanner.diag.mixedContent") : t("scanner.diag.generic")}
+            </p>
+            <p className="text-[10px] md:text-[11px] font-mono text-red-700/70 dark:text-red-400/60 break-all">
+              {WS_ENDPOINT}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Onboarding: 3 langkah cara trading (bisa ditutup permanen) */}
       <TradingStepsBanner />
@@ -438,13 +478,13 @@ export default function ScannerPage() {
 
       {/* Peringatan koneksi bursa */}
       {snapshot && !snapshot.stream.connected && (
-        <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/20 p-4 flex gap-3">
-          <WifiOff className="w-5 h-5 shrink-0 text-red-600 dark:text-red-500 mt-0.5" />
+        <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/20 p-3 md:p-4 flex gap-2.5 md:gap-3">
+          <WifiOff className="w-4 h-4 md:w-5 md:h-5 shrink-0 text-red-600 dark:text-red-500 mt-0.5" />
           <div>
-            <p className="text-sm font-semibold text-red-900 dark:text-red-400">
+            <p className="text-xs md:text-sm font-semibold text-red-900 dark:text-red-400">
               {t("scanner.streamDown.title")}
             </p>
-            <p className="text-xs text-red-800/90 dark:text-red-300/80 mt-1">
+            <p className="text-[11px] md:text-xs text-red-800/90 dark:text-red-300/80 mt-1">
               {t("scanner.streamDown.body", {
                 attempts: snapshot.stream.consecutive_failures,
               })}
@@ -455,9 +495,9 @@ export default function ScannerPage() {
 
       {/* Konten */}
       {isInitialLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 md:gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl p-5 animate-pulse space-y-4">
+            <div key={i} className="border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b] rounded-xl p-3 md:p-5 animate-pulse space-y-3 md:space-y-4">
               <div className="flex justify-between items-center pb-2">
                 <div className="h-6 w-24 bg-slate-200 dark:bg-zinc-800 rounded" />
                 <div className="h-6 w-16 bg-slate-200 dark:bg-zinc-800 rounded" />
@@ -471,17 +511,17 @@ export default function ScannerPage() {
           ))}
         </div>
       ) : signals.length === 0 ? (
-        <div className="p-12 border border-dashed border-slate-300 bg-slate-50 dark:border-zinc-800 dark:bg-transparent rounded-xl text-slate-500 dark:text-zinc-500 text-center flex flex-col items-center">
-          <WifiOff className="w-12 h-12 mb-4 opacity-30" />
-          <p className="font-medium text-slate-700 dark:text-zinc-300">{t("scanner.empty.title")}</p>
-          <p className="text-sm mt-1">
+        <div className="p-8 md:p-12 border border-dashed border-slate-300 bg-slate-50 dark:border-zinc-800 dark:bg-transparent rounded-xl text-slate-500 dark:text-zinc-500 text-center flex flex-col items-center">
+          <WifiOff className="w-9 h-9 md:w-12 md:h-12 mb-3 md:mb-4 opacity-30" />
+          <p className="text-sm md:text-base font-medium text-slate-700 dark:text-zinc-300">{t("scanner.empty.title")}</p>
+          <p className="text-xs md:text-sm mt-1">
             {socketState === "connected"
               ? t("scanner.empty.connected")
               : t("scanner.empty.disconnected")}
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 md:gap-4 md:grid-cols-2 xl:grid-cols-3">
           {signals.map((item, index) => {
             const isLocked = tier !== "pro" && index >= 3;
             const isOpen = expanded === item.coin;
@@ -492,7 +532,7 @@ export default function ScannerPage() {
                 key={item.pair}
                 onClick={() => !isLocked && usable && setExpanded(isOpen ? null : item.coin)}
                 className={cn(
-                  "group relative border rounded-xl p-5 transition-all duration-300 overflow-hidden",
+                  "group relative border rounded-xl p-3 md:p-5 transition-all duration-300 overflow-hidden",
                   "border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#09090b]",
                   !isLocked && usable && "cursor-pointer hover:border-slate-300 dark:hover:border-zinc-700 hover:shadow-md",
                   !usable && "opacity-75",
@@ -501,17 +541,17 @@ export default function ScannerPage() {
               >
                 <div className={cn("transition-all duration-500", isLocked && "blur-[6px] select-none opacity-50")}>
                   {/* Judul + harga + sinyal */}
-                  <div className="flex justify-between items-start gap-2 mb-4">
+                  <div className="flex justify-between items-start gap-2 mb-3 md:mb-4">
                     <div>
-                      <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+                      <h2 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 dark:text-white">
                         {item.coin}{" "}
-                        <span className="text-sm font-medium text-slate-400 dark:text-zinc-500">/ USDT</span>
+                        <span className="text-xs md:text-sm font-medium text-slate-400 dark:text-zinc-500">/ USDT</span>
                       </h2>
-                      <p className="mt-1 font-mono text-sm text-slate-600 dark:text-zinc-400">
+                      <p className="mt-0.5 md:mt-1 font-mono text-xs md:text-sm text-slate-600 dark:text-zinc-400">
                         {fmtPrice(item.price)}
                         {typeof item.change_24h === "number" && (
                           <span className={cn(
-                            "ml-2 text-xs font-semibold",
+                            "ml-2 text-[11px] md:text-xs font-semibold",
                             item.change_24h >= 0 ? "text-emerald-600 dark:text-emerald-500" : "text-red-600 dark:text-red-500",
                           )}>
                             {item.change_24h >= 0 ? "+" : ""}{fmt(item.change_24h)}%
@@ -523,7 +563,7 @@ export default function ScannerPage() {
                     {item.signal ? (
                       <span
                         className={cn(
-                          "px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider border shrink-0",
+                          "px-2 py-0.5 md:px-3 md:py-1 rounded-md text-[10px] md:text-xs font-bold uppercase tracking-wider border shrink-0",
                           item.signal === "LONG"
                             ? "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-500 dark:border-emerald-500/20"
                             : item.signal === "SHORT"
@@ -534,7 +574,7 @@ export default function ScannerPage() {
                         {item.signal}
                       </span>
                     ) : (
-                      <span className="px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider border bg-slate-100 text-slate-500 border-slate-200 dark:bg-zinc-900 dark:text-zinc-500 dark:border-zinc-800 shrink-0">
+                      <span className="px-2 py-0.5 md:px-3 md:py-1 rounded-md text-[10px] md:text-xs font-bold uppercase tracking-wider border bg-slate-100 text-slate-500 border-slate-200 dark:bg-zinc-900 dark:text-zinc-500 dark:border-zinc-800 shrink-0">
                         {t("scanner.card.noSignal")}
                       </span>
                     )}
@@ -542,9 +582,9 @@ export default function ScannerPage() {
 
                   {/* Status non-ok ditampilkan terbuka, bukan disembunyikan */}
                   {item.status !== "ok" && (
-                    <div className="mb-4 space-y-1.5">
+                    <div className="mb-3 md:mb-4 space-y-1.5">
                       <StatusPill status={item.status} ageSeconds={item.price_age_seconds} />
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-500 leading-relaxed">
+                      <p className="text-[10px] md:text-[11px] text-slate-500 dark:text-zinc-500 leading-relaxed">
                         {item.error?.message ??
                           (STATUS_COPY[item.status] ? t(STATUS_COPY[item.status].detail) : "")}
                       </p>
@@ -552,10 +592,10 @@ export default function ScannerPage() {
                   )}
 
                   {usable ? (
-                    <div className="space-y-3">
+                    <div className="space-y-2 md:space-y-3">
                       <CriteriaList met={item.criteria_met} total={item.criteria_total} />
 
-                      <div className="flex justify-between items-center text-sm border-t border-slate-100 dark:border-zinc-800/50 pt-3">
+                      <div className="flex justify-between items-center text-xs md:text-sm border-t border-slate-100 dark:border-zinc-800/50 pt-2.5 md:pt-3">
                         <span className="text-slate-500 dark:text-zinc-400 font-medium">RSI (14)</span>
                         <span className={cn(
                           "font-mono font-medium",
@@ -567,22 +607,22 @@ export default function ScannerPage() {
                         </span>
                       </div>
 
-                      <div className="flex justify-between items-center text-sm">
+                      <div className="flex justify-between items-center text-xs md:text-sm">
                         <span className="text-slate-500 dark:text-zinc-400 font-medium">EMA 20 / 50</span>
                         <span className="font-mono text-slate-700 dark:text-zinc-300 font-medium">
                           {fmt(item.ema20)} <span className="text-slate-300 dark:text-zinc-600">/</span> {fmt(item.ema50)}
                         </span>
                       </div>
 
-                      <div className="flex justify-between items-center text-sm">
+                      <div className="flex justify-between items-center text-xs md:text-sm">
                         <span className="text-slate-500 dark:text-zinc-400 font-medium">{t("scanner.card.trend")}</span>
                         <div className="flex items-center gap-1.5 font-medium">
                           {item.trend?.toLowerCase() === "bullish" ? (
-                            <><TrendingUp className="w-4 h-4 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-500">{t("scanner.trend.bullish")}</span></>
+                            <><TrendingUp className="w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-500" /><span className="text-emerald-600 dark:text-emerald-500">{t("scanner.trend.bullish")}</span></>
                           ) : item.trend?.toLowerCase() === "bearish" ? (
-                            <><TrendingDown className="w-4 h-4 text-red-500" /><span className="text-red-600 dark:text-red-500">{t("scanner.trend.bearish")}</span></>
+                            <><TrendingDown className="w-3.5 h-3.5 md:w-4 md:h-4 text-red-500" /><span className="text-red-600 dark:text-red-500">{t("scanner.trend.bearish")}</span></>
                           ) : (
-                            <><Minus className="w-4 h-4 text-slate-400 dark:text-zinc-500" /><span className="text-slate-500 dark:text-zinc-400">—</span></>
+                            <><Minus className="w-3.5 h-3.5 md:w-4 md:h-4 text-slate-400 dark:text-zinc-500" /><span className="text-slate-500 dark:text-zinc-400">—</span></>
                           )}
                         </div>
                       </div>

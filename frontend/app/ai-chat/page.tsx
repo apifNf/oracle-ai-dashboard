@@ -204,13 +204,13 @@ export default function AiChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)] max-w-5xl mx-auto px-4 relative">
-      <div className="py-6 border-b border-slate-200 dark:border-zinc-800/50 mb-4 sticky top-0 z-10 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-md">
-        <p className="text-xs uppercase tracking-[0.3em] font-bold text-emerald-500 mb-2 flex items-center gap-2">
-          <Activity className="w-4 h-4 animate-pulse" /> {t("chat.eyebrow")}
+    <div className="flex flex-col h-[calc(100vh-6rem)] max-w-5xl mx-auto px-0 sm:px-4 relative">
+      <div className="py-3 md:py-6 border-b border-slate-200 dark:border-zinc-800/50 mb-3 md:mb-4 sticky top-0 z-10 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-md">
+        <p className="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] font-bold text-emerald-500 mb-1.5 md:mb-2 flex items-center gap-1.5 md:gap-2">
+          <Activity className="w-3.5 h-3.5 md:w-4 md:h-4 animate-pulse" /> {t("chat.eyebrow")}
         </p>
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-semibold flex items-center gap-3 text-slate-900 dark:text-zinc-50">
+          <h1 className="text-xl md:text-4xl font-semibold flex items-center gap-2 md:gap-3 text-slate-900 dark:text-zinc-50">
             {t("chat.title")}
           </h1>
           {tier === 'pro' && (
@@ -224,7 +224,7 @@ export default function AiChatPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-8 pr-2 pb-40 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto space-y-4 md:space-y-8 pr-1 md:pr-2 pb-40 custom-scrollbar">
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-4 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             {msg.role !== "user" && (
@@ -245,7 +245,7 @@ export default function AiChatPage() {
               )}
 
               <div className={cn(
-                "p-5 rounded-2xl whitespace-pre-wrap text-[15px] leading-relaxed shadow-sm transition-all",
+                "p-3 md:p-5 rounded-xl md:rounded-2xl whitespace-pre-wrap text-sm md:text-[15px] leading-relaxed shadow-sm transition-all",
                 msg.role === "user" 
                   ? "bg-gradient-to-br from-slate-800 to-slate-900 text-white dark:from-zinc-800 dark:to-zinc-900 rounded-br-none border border-slate-700/50" 
                   : msg.role === "system"
@@ -290,7 +290,7 @@ export default function AiChatPage() {
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
               <Brain className="w-5 h-5 text-emerald-500 animate-pulse" />
             </div>
-            <div className="p-5 rounded-2xl bg-white border border-slate-200 dark:bg-[#111113] dark:border-zinc-800 rounded-bl-none shadow-sm flex items-center gap-3">
+            <div className="p-3 md:p-5 rounded-xl md:rounded-2xl bg-white border border-slate-200 dark:bg-[#111113] dark:border-zinc-800 rounded-bl-none shadow-sm flex items-center gap-3">
               <div className="flex gap-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: "0ms" }}></span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: "150ms" }}></span>
