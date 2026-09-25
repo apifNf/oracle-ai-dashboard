@@ -219,19 +219,19 @@ export default function DashboardPage() {
       </div>
 
       {/* MAIN DASHBOARD CONTENT */}
-      <div className="p-6 md:p-10 max-w-7xl mx-auto w-full space-y-8">
-        
+      <div className="p-4 sm:p-6 md:p-10 max-w-7xl mx-auto w-full space-y-6 md:space-y-8">
+
         <div>
           <p className="text-xs uppercase tracking-[0.3em] font-bold text-emerald-600 dark:text-emerald-500 mb-2 flex items-center gap-2">
             <Activity className="w-4 h-4 animate-pulse" /> {t("dashboard.eyebrow")}
           </p>
-          <h1 className="text-3xl font-semibold text-slate-900 dark:text-white transition-colors duration-300">
+          <h1 className="text-2xl md:text-3xl font-semibold text-slate-900 dark:text-white transition-colors duration-300">
             {t("dashboard.title")}
           </h1>
         </div>
 
         {/* INTERACTIVE PREMIUM CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5">
           <StatCard 
             title={t("dashboard.card.macro.title")}
             value={t("dashboard.card.macro.value")}
@@ -292,14 +292,14 @@ export default function DashboardPage() {
         {/* QUICK AI TERMINAL */}
         <div className="mt-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] overflow-hidden shadow-xl dark:shadow-2xl relative group transition-colors duration-300">
           <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
-          
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 transition-colors duration-300">
+
+          <div className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 transition-colors duration-300">
             <h2 className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-zinc-300">
               <Terminal className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /> {t("dashboard.quickAsk.title")}
             </h2>
           </div>
-          
-          <div className="p-6">
+
+          <div className="p-4 md:p-6">
             <form onSubmit={handleAskOracle} className="relative flex items-center bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl shadow-inner focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/50 transition-all">
               <input
                 type="text"
@@ -307,9 +307,9 @@ export default function DashboardPage() {
                 onChange={(e) => setPrompt(e.target.value)}
                 disabled={isLoading}
                 placeholder={t("dashboard.quickAsk.placeholder")}
-                className="w-full bg-transparent border-none py-4 px-4 text-[15px] text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-0 disabled:opacity-50"
+                className="w-full bg-transparent border-none py-3 md:py-4 px-4 text-sm md:text-[15px] text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-0 disabled:opacity-50"
               />
-              <button 
+              <button
                 type="submit"
                 disabled={isLoading || !prompt.trim()}
                 className="absolute right-2 p-2 bg-emerald-100 dark:bg-emerald-600/20 text-emerald-600 dark:text-emerald-500 hover:bg-emerald-500 hover:text-white rounded-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
@@ -317,17 +317,17 @@ export default function DashboardPage() {
                 {isLoading ? <Radar className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
             </form>
-            
+
             {/* AREA OUTPUT JAWABAN AI */}
             {(isLoading || response) && (
-              <div className="mt-4 p-5 rounded-xl bg-slate-50/50 dark:bg-zinc-900/50 border border-slate-100 dark:border-zinc-800/80 transition-all duration-300">
+              <div className="mt-4 p-4 md:p-5 rounded-xl bg-slate-50/50 dark:bg-zinc-900/50 border border-slate-100 dark:border-zinc-800/80 transition-all duration-300">
                 {isLoading ? (
                   <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-500">
                     <BrainCircuit className="w-5 h-5 animate-pulse" />
                     <span className="text-sm font-medium animate-pulse">{t("dashboard.quickAsk.processing")}</span>
                   </div>
                 ) : (
-                  <div className="text-[15px] text-slate-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">
+                  <div className="text-sm md:text-[15px] text-slate-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">
                     {response}
                   </div>
                 )}
@@ -343,24 +343,24 @@ export default function DashboardPage() {
 
 function StatCard({ title, value, subtitle, icon, glowColor, href, loading = false }: { title: string, value: string, subtitle: string, icon: any, glowColor: string, href: string, loading?: boolean }) {
   return (
-    <Link href={href} className={`group block p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] hover:bg-slate-50 dark:hover:bg-[#151518] hover:-translate-y-1 transition-all duration-300 relative overflow-hidden cursor-pointer shadow-sm dark:shadow-none ${glowColor}`}>
-      
-      <div className="flex justify-between items-start mb-6 relative z-10">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-slate-50 dark:bg-zinc-900 rounded-xl border border-slate-100 dark:border-zinc-800 group-hover:bg-slate-100 dark:group-hover:bg-zinc-800/80 transition-colors shadow-inner dark:shadow-none">
+    <Link href={href} className={`group block p-4 md:p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-[#111113] hover:bg-slate-50 dark:hover:bg-[#151518] hover:-translate-y-1 transition-all duration-300 relative overflow-hidden cursor-pointer shadow-sm dark:shadow-none ${glowColor}`}>
+
+      <div className="flex justify-between items-start mb-4 md:mb-6 relative z-10">
+        <div className="flex items-center gap-2.5 md:gap-3">
+          <div className="p-2 md:p-2.5 bg-slate-50 dark:bg-zinc-900 rounded-xl border border-slate-100 dark:border-zinc-800 group-hover:bg-slate-100 dark:group-hover:bg-zinc-800/80 transition-colors shadow-inner dark:shadow-none">
             {icon}
           </div>
-          <p className="text-sm font-semibold tracking-wide text-slate-500 dark:text-zinc-400 group-hover:text-slate-700 dark:group-hover:text-zinc-200 transition-colors">{title}</p>
+          <p className="text-xs md:text-sm font-semibold tracking-wide text-slate-500 dark:text-zinc-400 group-hover:text-slate-700 dark:group-hover:text-zinc-200 transition-colors">{title}</p>
         </div>
-        
+
         <ArrowUpRight className="w-5 h-5 text-slate-400 dark:text-zinc-500 opacity-0 group-hover:opacity-100 transform translate-x-2 translate-y-2 group-hover:translate-x-0 group-hover:translate-y-0 transition-all duration-300" />
       </div>
 
       <div className="relative z-10">
-        <h3 className={`text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-colors duration-300 ${loading ? "text-xl animate-pulse" : ""}`}>
+        <h3 className={`text-xl md:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white tracking-tight transition-colors duration-300 ${loading ? "text-lg md:text-xl animate-pulse" : ""}`}>
           {value}
         </h3>
-        <p className="text-[13px] text-slate-500 dark:text-zinc-500 mt-2 font-medium transition-colors duration-300">{subtitle}</p>
+        <p className="text-xs md:text-[13px] text-slate-500 dark:text-zinc-500 mt-1.5 md:mt-2 font-medium transition-colors duration-300">{subtitle}</p>
       </div>
 
       <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-slate-200/50 dark:bg-white/5 rounded-full blur-3xl group-hover:bg-slate-300/50 dark:group-hover:bg-white/10 transition-colors duration-500 pointer-events-none"></div>

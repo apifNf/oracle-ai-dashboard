@@ -24,6 +24,7 @@ export const en = {
   // Sidebar
   // ------------------------------------------------------------------ //
   "sidebar.subtitle": "Crypto Analyst",
+  "sidebar.more": "More",
   "sidebar.signOut": "Sign Out",
   "sidebar.proTier": "PRO TIER",
   "sidebar.freeTier": "FREE TIER",
@@ -373,6 +374,7 @@ export const id: Record<TranslationKey, string> = {
   // Sidebar
   // ------------------------------------------------------------------ //
   "sidebar.subtitle": "Analis Kripto",
+  "sidebar.more": "Lainnya",
   "sidebar.signOut": "Keluar",
   "sidebar.proTier": "TIER PRO",
   "sidebar.freeTier": "TIER GRATIS",

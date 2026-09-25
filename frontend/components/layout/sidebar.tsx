@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
-import { Bot, Gauge, MessageSquareText, NotebookPen, Settings, Globe, User, LogOut, Activity, CandlestickChart } from "lucide-react";
+import { Bot, Gauge, MessageSquareText, NotebookPen, Settings, Globe, User, LogOut, Activity, CandlestickChart, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
@@ -21,6 +21,11 @@ const navItems: { href: string; labelKey: TranslationKey; icon: any; protected: 
   { href: "/settings", labelKey: "nav.settings", icon: Settings, protected: true }
 ];
 
+// Bottom nav mobile: hanya 4 item paling sering dipakai + tombol "More" ke-5
+// (labelnya pendek, muat dengan teks kecil tanpa terpotong). Sisanya (Market
+// Intelligence, Technical Analyst, Settings) dipindah ke sheet "More".
+const MOBILE_PRIMARY_HREFS = ["/", "/scanner", "/ai-chat", "/journal"];
+
 export function Sidebar() {
   const t = useTranslation();
   const pathname = usePathname();
@@ -29,6 +34,7 @@ export function Sidebar() {
   const [tier, setTier] = useState<'free' | 'pro' | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -100,17 +106,20 @@ export function Sidebar() {
 
   return (
     <>
+      {/* Header mobile + sidebar desktop. Nav berlabel penuh (horizontal-scroll)
+          disembunyikan di mobile — diganti bottom nav ikon-only di bawah, supaya
+          tidak lagi terasa bulky/overflow di layar kecil. */}
       <aside className="border-b border-slate-200 bg-white/80 dark:border-white/10 dark:bg-[#0A0A0A]/80 px-4 py-3 backdrop-blur md:fixed md:inset-y-0 md:left-0 md:w-64 md:flex md:flex-col md:border-b-0 md:border-r md:p-5 transition-colors duration-500 z-40">
         <div className="flex items-center justify-between md:block">
-          <Link href="/" className="text-xl font-semibold tracking-wide text-slate-900 dark:text-zinc-50 transition-colors duration-500">
+          <Link href="/" className="text-lg md:text-xl font-semibold tracking-wide text-slate-900 dark:text-zinc-50 transition-colors duration-500">
             ORACLE
           </Link>
-          <span className="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-400 md:mt-1 md:block transition-colors duration-500">
+          <span className="hidden sm:block text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-zinc-400 md:mt-1 transition-colors duration-500">
             {t("sidebar.subtitle")}
           </span>
         </div>
-        
-        <nav className="mt-4 flex gap-2 overflow-x-auto md:mt-8 md:block md:space-y-1 flex-1">
+
+        <nav className="hidden md:mt-8 md:block md:space-y-1 flex-1">
           {navItems.map((item) => {
             const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             return (
@@ -120,8 +129,8 @@ export function Sidebar() {
                 onClick={(e) => handleNavigation(e, item.protected)}
                 className={cn(
                   "flex min-w-fit items-center gap-3 rounded-md px-3 py-2 text-sm transition-all duration-300",
-                  isActive 
-                    ? "bg-slate-100 text-emerald-600 dark:bg-white/10 dark:text-emerald-400 font-medium" 
+                  isActive
+                    ? "bg-slate-100 text-emerald-600 dark:bg-white/10 dark:text-emerald-400 font-medium"
                     : "text-slate-500 dark:text-zinc-400 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
@@ -168,6 +177,126 @@ export function Sidebar() {
           </div>
         )}
       </aside>
+
+      {/* BOTTOM NAV — mobile only. 4 tab utama + "More" (sheet berisi item
+          sisanya + akun) supaya tidak perlu memuat 7 label penuh sekaligus di
+          layar sempit. Padding konten halaman diberi ruang lewat pb-20 di
+          AppShell supaya bar ini tidak menutupi konten paling bawah. */}
+      <nav
+        className="md:hidden fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t border-slate-200 bg-white/95 dark:border-white/10 dark:bg-[#0A0A0A]/95 backdrop-blur pb-[env(safe-area-inset-bottom)] transition-colors duration-500"
+        aria-label={t("sidebar.subtitle")}
+      >
+        {navItems
+          .filter((item) => MOBILE_PRIMARY_HREFS.includes(item.href))
+          .map((item) => {
+            const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={(e) => handleNavigation(e, item.protected)}
+                className={cn(
+                  "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
+                  isActive
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-slate-500 dark:text-zinc-400",
+                )}
+              >
+                <item.icon className="h-5 w-5" />
+                <span className="truncate max-w-[64px]">{t(item.labelKey)}</span>
+              </Link>
+            );
+          })}
+        <button
+          type="button"
+          onClick={() => setMobileMoreOpen(true)}
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium text-slate-500 dark:text-zinc-400"
+        >
+          <Menu className="h-5 w-5" />
+          <span>{t("sidebar.more")}</span>
+        </button>
+      </nav>
+
+      {/* "More" sheet — item nav sisanya (Market Intelligence, Technical
+          Analyst, Settings) + info akun/sign-out, dipindah dari sidebar
+          desktop supaya tetap terjangkau di mobile tanpa bikin bottom nav
+          penuh sesak. */}
+      {mobileMoreOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex items-end bg-black/50 backdrop-blur-sm" onClick={() => setMobileMoreOpen(false)}>
+          <div
+            className="w-full rounded-t-2xl border-t border-slate-200 bg-white dark:border-white/10 dark:bg-[#0A0A0A] p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl transition-colors duration-500"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-slate-900 dark:text-white">{t("sidebar.more")}</span>
+              <button onClick={() => setMobileMoreOpen(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              {navItems
+                .filter((item) => !MOBILE_PRIMARY_HREFS.includes(item.href))
+                .map((item) => {
+                  const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={(e) => {
+                        handleNavigation(e, item.protected);
+                        setMobileMoreOpen(false);
+                      }}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
+                        isActive
+                          ? "bg-slate-100 text-emerald-600 dark:bg-white/10 dark:text-emerald-400 font-medium"
+                          : "text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-white/5",
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      {t(item.labelKey)}
+                    </Link>
+                  );
+                })}
+            </div>
+
+            {user && (
+              <div className="mt-3 pt-3 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 shrink-0">
+                    <User className="w-4 h-4 text-slate-500 dark:text-zinc-400" />
+                  </div>
+                  <div className="flex flex-col overflow-hidden">
+                    <span className="text-xs font-medium text-slate-700 dark:text-zinc-200 truncate">
+                      {user.email}
+                    </span>
+                    {tier === "pro" ? (
+                      <span className="mt-0.5 inline-flex items-center gap-1 self-start rounded px-1.5 py-0.5 text-[10px] font-bold tracking-widest uppercase text-emerald-700 bg-emerald-500/10 border border-emerald-500/40 dark:text-amber-300 dark:bg-gradient-to-r dark:from-emerald-500/15 dark:to-amber-500/15 dark:border-amber-400/40">
+                        {t("sidebar.proTier")}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold tracking-widest uppercase mt-0.5 text-slate-500 dark:text-zinc-500">
+                        {t("sidebar.freeTier")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setMobileMoreOpen(false);
+                    handleSignOut();
+                  }}
+                  className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all shrink-0"
+                  title={t("sidebar.signOut")}
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">

@@ -6,11 +6,13 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#0A0A0A] dark:text-zinc-50 transition-colors duration-500 flex flex-col">
       <Sidebar />
-      <main className="flex-1 px-4 py-6 md:pl-72 md:pr-8 lg:pr-10 flex flex-col">
+      {/* pb-20: ruang untuk bottom nav mobile (fixed, lihat Sidebar) — tidak
+          berlaku di md+ karena bottom nav itu sendiri hidden di sana. */}
+      <main className="flex-1 px-4 py-4 pb-20 md:pb-6 md:pl-72 md:pr-8 lg:pr-10 flex flex-col">
         <div className="mx-auto max-w-7xl w-full flex-1 flex flex-col">
-          
+
           {/* Topbar: Diberi padding-top agar sejajar/balance dengan judul halaman */}
-          <div className="w-full flex items-center justify-end gap-3 pt-2 pb-2 mb-6">
+          <div className="w-full flex items-center justify-end gap-3 pt-2 pb-2 mb-4 md:mb-6">
             <LanguageToggle />
             <ThemeToggle />
           </div>

@@ -83,70 +83,70 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
       </div>
 
-      <div className="max-w-md w-full mx-auto p-8 relative z-10">
-        
+      <div className="max-w-md w-full mx-auto p-4 sm:p-6 md:p-8 relative z-10">
+
         {/* Header Logo */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white dark:bg-[#111113] border border-slate-200 dark:border-zinc-800 shadow-xl dark:shadow-2xl mb-6 relative group transition-colors duration-300">
+        <div className="text-center mb-6 md:mb-10">
+          <div className="inline-flex items-center justify-center w-12 h-12 md:w-16 md:h-16 rounded-2xl bg-white dark:bg-[#111113] border border-slate-200 dark:border-zinc-800 shadow-xl dark:shadow-2xl mb-4 md:mb-6 relative group transition-colors duration-300">
             <div className="absolute inset-0 bg-emerald-500/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-            <Activity className="w-8 h-8 text-emerald-600 dark:text-emerald-500 relative z-10" />
+            <Activity className="w-6 h-6 md:w-8 md:h-8 text-emerald-600 dark:text-emerald-500 relative z-10" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight mb-2 transition-colors duration-300">ORACLE Core</h1>
-          <p className="text-slate-500 dark:text-zinc-400 text-sm transition-colors duration-300">Algorithmic Crypto Intelligence</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight mb-1.5 md:mb-2 transition-colors duration-300">ORACLE Core</h1>
+          <p className="text-slate-500 dark:text-zinc-400 text-xs md:text-sm transition-colors duration-300">Algorithmic Crypto Intelligence</p>
         </div>
 
         {/* Auth Card */}
-        <div className="bg-white/80 dark:bg-[#111113]/80 backdrop-blur-xl border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl p-8 shadow-2xl relative overflow-hidden transition-colors duration-300">
-          
+        <div className="bg-white/80 dark:bg-[#111113]/80 backdrop-blur-xl border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl p-5 sm:p-6 md:p-8 shadow-2xl relative overflow-hidden transition-colors duration-300">
+
           {/* Subtle top glow */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-emerald-500/50 blur-[2px]"></div>
 
-          <div className="mb-8">
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-1 transition-colors duration-300">
+          <div className="mb-5 md:mb-8">
+            <h2 className="text-lg md:text-xl font-semibold text-slate-900 dark:text-white mb-1 transition-colors duration-300">
               {step === "email" ? "Authentication Protocol" : "Verify Magic Code"}
             </h2>
-            <p className="text-sm text-slate-500 dark:text-zinc-400 transition-colors duration-300">
-              {step === "email" 
-                ? "Enter your institutional email to receive a secure login link." 
+            <p className="text-xs md:text-sm text-slate-500 dark:text-zinc-400 transition-colors duration-300">
+              {step === "email"
+                ? "Enter your institutional email to receive a secure login link."
                 : `Enter the 6-digit code sent to ${email}`}
             </p>
           </div>
 
           {/* Message Alert */}
           {message.text && (
-            <div className={`p-4 rounded-xl mb-6 text-sm flex items-start gap-3 border transition-colors duration-300 ${
+            <div className={`p-3 md:p-4 rounded-xl mb-4 md:mb-6 text-xs md:text-sm flex items-start gap-2.5 md:gap-3 border transition-colors duration-300 ${
               message.type === "success" 
                 ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-400" 
                 : "bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20 text-red-700 dark:text-red-400"
             }`}>
-              {message.type === "success" ? <ShieldCheck className="w-5 h-5 flex-shrink-0" /> : <ShieldAlert className="w-5 h-5 flex-shrink-0" />}
+              {message.type === "success" ? <ShieldCheck className="w-4 h-4 md:w-5 md:h-5 flex-shrink-0" /> : <ShieldAlert className="w-4 h-4 md:w-5 md:h-5 flex-shrink-0" />}
               <span className="mt-0.5">{message.text}</span>
             </div>
           )}
 
           {/* Form State: EMAIL */}
           {step === "email" ? (
-            <form onSubmit={handleSendOtp} className="space-y-5">
-              <div className="space-y-2">
+            <form onSubmit={handleSendOtp} className="space-y-4 md:space-y-5">
+              <div className="space-y-1.5 md:space-y-2">
                 <label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider transition-colors duration-300">Email Address</label>
                 <div className="relative flex items-center">
-                  <Mail className="absolute left-4 w-5 h-5 text-slate-400 dark:text-zinc-500 transition-colors duration-300" />
+                  <Mail className="absolute left-4 w-4 h-4 md:w-5 md:h-5 text-slate-400 dark:text-zinc-500 transition-colors duration-300" />
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="analyst@fund.com"
                     required
-                    className="w-full bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl py-4 pl-12 pr-4 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all duration-300"
+                    className="w-full bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl py-3 md:py-4 pl-11 md:pl-12 pr-4 text-sm md:text-base text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all duration-300"
                     disabled={loading}
                   />
                 </div>
               </div>
-              
-              <button 
+
+              <button
                 type="submit"
                 disabled={loading || !email}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-zinc-200 dark:text-black font-semibold rounded-xl py-4 px-4 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-zinc-200 dark:text-black font-semibold rounded-xl py-3 md:py-4 px-4 text-sm md:text-base flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -160,11 +160,11 @@ export default function LoginPage() {
             </form>
           ) : (
             /* Form State: OTP VERIFICATION */
-            <form onSubmit={handleVerifyOtp} className="space-y-5">
-              <div className="space-y-2">
+            <form onSubmit={handleVerifyOtp} className="space-y-4 md:space-y-5">
+              <div className="space-y-1.5 md:space-y-2">
                 <label className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider transition-colors duration-300">Security Code</label>
                 <div className="relative flex items-center">
-                  <KeyRound className="absolute left-4 w-5 h-5 text-slate-400 dark:text-zinc-500 transition-colors duration-300" />
+                  <KeyRound className="absolute left-4 w-4 h-4 md:w-5 md:h-5 text-slate-400 dark:text-zinc-500 transition-colors duration-300" />
                   <input
                     type="text"
                     value={otp}
@@ -172,23 +172,23 @@ export default function LoginPage() {
                     placeholder="000000"
                     required
                     maxLength={6}
-                    className="w-full bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl py-4 pl-12 pr-4 text-slate-900 dark:text-white text-center tracking-[0.5em] font-mono text-lg placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all duration-300"
+                    className="w-full bg-slate-50 dark:bg-[#09090b] border border-slate-200 dark:border-zinc-800 rounded-xl py-3 md:py-4 pl-11 md:pl-12 pr-4 text-slate-900 dark:text-white text-center tracking-[0.5em] font-mono text-base md:text-lg placeholder:text-slate-400 dark:placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all duration-300"
                     disabled={loading}
                   />
                 </div>
               </div>
-              
-              <button 
+
+              <button
                 type="submit"
                 disabled={loading || otp.length < 6}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl py-4 px-4 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl py-3 md:py-4 px-4 text-sm md:text-base flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify & Access"}
               </button>
-              
-              <div className="text-center pt-2">
-                <button 
-                  type="button" 
+
+              <div className="text-center pt-1 md:pt-2">
+                <button
+                  type="button"
                   onClick={() => { setStep("email"); setOtp(""); setMessage({text: "", type: ""}) }}
                   className="text-xs text-slate-500 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-white transition-colors"
                   disabled={loading}
@@ -200,9 +200,9 @@ export default function LoginPage() {
           )}
 
         </div>
-        
+
         {/* Footer */}
-        <div className="text-center mt-10">
+        <div className="text-center mt-6 md:mt-10">
           <p className="text-xs text-slate-400 dark:text-zinc-600 transition-colors duration-300">
             Protected by ORACLE Matrix Auth. <br/> By entering, you agree to our Terms of Service.
           </p>
