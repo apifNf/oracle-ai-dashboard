@@ -57,6 +57,11 @@ export function buildCsp(nonce: string, isDev: boolean): string {
     ...supabase,
     "https://s3.tradingview.com",
     "https://*.tradingview.com",
+    // Live market ticker (Dashboard) mengambil harga langsung dari klien ke
+    // Binance Vision — tanpa ini browser MEMBLOKIR fetch-nya sebagai
+    // pelanggaran CSP (connect-src default 'self'), dan ticker macet selama-
+    // nya di "Loading..." tanpa error yang terlihat user (lihat app/page.tsx).
+    "https://data-api.binance.vision",
   ];
 
   const directives: Record<string, string[]> = {
