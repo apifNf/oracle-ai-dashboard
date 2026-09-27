@@ -30,11 +30,6 @@ export default function DashboardPage() {
   const [response, setResponse] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [tickers, setTickers] = useState(initialTickers);
-  // "loading" tetap ditampilkan sampai fetch PERTAMA sukses. Sebelumnya, kalau
-  // fetch gagal terus (mis. domain Binance diblokir jaringan/operator seluler
-  // tertentu), ticker diam-diam macet selamanya di 15 baris "Loading..." tanpa
-  // indikasi apa pun ke user — sekarang status kegagalan eksplisit ditampilkan.
-  const [tickerStatus, setTickerStatus] = useState<"loading" | "ready" | "error">("loading");
   const [activeSignals, setActiveSignals] = useState<number | string>("Scanning...");
   const isScanning = activeSignals === "Scanning...";
   const [ledger, setLedger] = useState<{ count: number; balance: number } | null>(null);
@@ -47,9 +42,7 @@ export default function DashboardPage() {
         const apiUrl = `https://data-api.binance.vision/api/v3/ticker/24hr?symbols=[${symbolsArray}]`;
         
         const res = await fetch(apiUrl);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (!Array.isArray(data)) throw new Error("Bentuk respons tidak dikenali");
 
         const liveData = data.map((item: any) => {
             const symbol = item.symbol.replace("USDT", "");
@@ -75,14 +68,9 @@ export default function DashboardPage() {
 
         if (liveData.length > 0) {
           setTickers(liveData);
-          setTickerStatus("ready");
         }
       } catch (error) {
         console.error("Gagal menarik data market dari jalur VIP:", error);
-        // Jangan biarkan macet diam-diam di "Loading..." — kalau belum pernah
-        // sukses sama sekali, tandai error supaya UI menampilkan status jelas
-        // alih-alih 15 baris placeholder beku selamanya.
-        setTickerStatus((prev) => (prev === "ready" ? prev : "error"));
       }
     };
 
@@ -219,41 +207,27 @@ export default function DashboardPage() {
           }
         `}</style>
 
-        {tickerStatus === "ready" ? (
-          <div className="animate-ticker">
-            {[...tickers, ...tickers].map((coin, idx) => (
-              <div key={idx} className="flex items-center gap-2 md:gap-3 px-4 md:px-8 border-r border-slate-200 dark:border-zinc-800/50 whitespace-nowrap cursor-default transition-colors duration-300">
+        <div className="animate-ticker">
+          {[...tickers, ...tickers].map((coin, idx) => (
+            <div key={idx} className="flex items-center gap-2 md:gap-3 px-4 md:px-8 border-r border-slate-200 dark:border-zinc-800/50 whitespace-nowrap cursor-default transition-colors duration-300">
 
-                <div className="w-4 h-4 md:w-5 md:h-5 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
-                  <img
-                    src={coin.logo}
-                    alt={coin.symbol}
-                    className="w-full h-full object-cover"
-                    onError={(e) => { e.currentTarget.src = "https://cryptologos.cc/logos/bitcoin-btc-logo.svg"; }}
-                  />
-                </div>
-
-                <span className="text-[11px] md:text-[13px] font-medium font-mono text-slate-500 dark:text-zinc-400">{coin.pair}</span>
-                <span className="text-xs md:text-[14px] text-slate-900 dark:text-white font-bold dark:font-semibold tracking-tight">{coin.price}</span>
-                <span className={`text-[11px] md:text-[13px] font-bold ${coin.isUp ? "text-emerald-600 dark:text-emerald-500" : "text-red-600 dark:text-red-500"}`}>
-                  {coin.change}
-                </span>
+              <div className="w-4 h-4 md:w-5 md:h-5 rounded-full overflow-hidden bg-slate-200 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
+                <img
+                  src={coin.logo}
+                  alt={coin.symbol}
+                  className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.src = "https://cryptologos.cc/logos/bitcoin-btc-logo.svg"; }}
+                />
               </div>
-            ))}
-          </div>
-        ) : (
-          // Jujur soal statusnya — daripada 15 baris "Loading..." beku
-          // selamanya kalau jalur data (Binance Vision, langsung dari klien)
-          // gagal terus (mis. diblokir jaringan/operator seluler tertentu).
-          <div className="flex items-center gap-2 px-4 w-full justify-center text-xs text-slate-400 dark:text-zinc-500">
-            <Radar className={`w-3.5 h-3.5 ${tickerStatus === "loading" ? "animate-spin-slow" : ""}`} />
-            <span>
-              {tickerStatus === "loading"
-                ? t("dashboard.ticker.connecting")
-                : t("dashboard.ticker.unavailable")}
-            </span>
-          </div>
-        )}
+
+              <span className="text-[11px] md:text-[13px] font-medium font-mono text-slate-500 dark:text-zinc-400">{coin.pair}</span>
+              <span className="text-xs md:text-[14px] text-slate-900 dark:text-white font-bold dark:font-semibold tracking-tight">{coin.price}</span>
+              <span className={`text-[11px] md:text-[13px] font-bold ${coin.isUp ? "text-emerald-600 dark:text-emerald-500" : "text-red-600 dark:text-red-500"}`}>
+                {coin.change}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* MAIN DASHBOARD CONTENT — px-0 di mobile: AppShell sudah kasih px-3,
